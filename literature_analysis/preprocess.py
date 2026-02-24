@@ -1,17 +1,3 @@
-"""
-Text preprocessing pipeline for clinical research articles.
-
-Cleans raw extracted text and prepares it for LLM-based structured extraction.
-
-Steps:
-  1. Remove boilerplate (headers, footers, form feeds)
-  2. Remove references, figure/table captions
-  3. Normalise whitespace and non-UTF characters
-  4. Segment text into sections (Abstract, Methods, Results, etc.)
-  5. Chunk long sections for context-limited LLMs
-  6. (Optional) Biomedical entity linking via scispaCy
-"""
-
 from __future__ import annotations
 
 import re
@@ -19,6 +5,7 @@ import unicodedata
 from typing import Optional
 
 import spacy
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from loguru import logger
 
 # ---------------------------------------------------------------------------
@@ -184,7 +171,7 @@ def segment_sections(text: str) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# 5. Chunking for LLMs
+# 5. Chunking for LLMs (via LangChain RecursiveCharacterTextSplitter)
 # ---------------------------------------------------------------------------
 
 def chunk_text(
@@ -193,41 +180,20 @@ def chunk_text(
     overlap: int = DEFAULT_CHUNK_OVERLAP,
 ) -> list[str]:
     """
-    Split *text* into overlapping chunks that respect sentence boundaries.
-
-    Each chunk is at most *max_chars* characters.  Overlap ensures context
-    continuity between consecutive chunks.
+    Split *text* into overlapping chunks using LangChain's
+    RecursiveCharacterTextSplitter, which tries paragraph → sentence →
+    word boundaries in order.
     """
     if len(text) <= max_chars:
         return [text]
 
-    # Split on sentence-ending punctuation followed by whitespace
-    sentences = re.split(r"(?<=[.!?])\s+", text)
-    chunks: list[str] = []
-    current: list[str] = []
-    current_len = 0
-
-    for sent in sentences:
-        if current_len + len(sent) + 1 > max_chars and current:
-            chunks.append(" ".join(current))
-            # Keep last few sentences for overlap
-            overlap_text = " ".join(current)
-            overlap_sents: list[str] = []
-            ol = 0
-            for s in reversed(current):
-                ol += len(s) + 1
-                overlap_sents.insert(0, s)
-                if ol >= overlap:
-                    break
-            current = overlap_sents
-            current_len = sum(len(s) + 1 for s in current)
-        current.append(sent)
-        current_len += len(sent) + 1
-
-    if current:
-        chunks.append(" ".join(current))
-
-    return chunks
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=max_chars,
+        chunk_overlap=overlap,
+        separators=["\n\n", "\n", ". ", "? ", "! ", " ", ""],
+        keep_separator=True,
+    )
+    return splitter.split_text(text)
 
 
 def chunk_sections(

@@ -1,11 +1,13 @@
 import json
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 import requests
 from pathlib import Path
 from lxml import etree
 from pyeuropepmc import SearchClient
 from loguru import logger
+from tqdm import tqdm
 
 from preprocess import preprocess
 
@@ -14,10 +16,14 @@ from pdfminer.high_level import extract_text
 from pdf2image import convert_from_path
 import pytesseract
 
+
+
+load_dotenv()  # Load environment variables from .env file
+
 # ----------------------------
 # Configuration
 # ----------------------------
-UNPAYWALL_EMAIL = "rabin.bk@fau.de"  # Replace with your email for Unpaywall API
+UNPAYWALL_EMAIL = os.getenv("UNPAYWALL_EMAIL")  # Replace with your email for Unpaywall API
 OUTPUT_DIR = Path("papers")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
@@ -216,14 +222,29 @@ def main():
             pageSize=100,       # Fetch 100 results per page
         )
 
-        for article in results["resultList"]["result"]:
+        articles = results["resultList"]["result"]
+        for article in tqdm(articles, desc="Processing articles", unit="article"):
             processed = process_article(article)
             if processed is not None:
                 all_articles.append(processed)
 
-    # Save a master index
+    # Save a lightweight master index (metadata only — no full text)
+    index_entries = [
+        {
+            "article_id": a["article_id"],
+            "title": a["title"],
+            "abstract": a["abstract"],
+            "doi": a["doi"],
+            "journal": a["journal"],
+            "publication_year": a["publication_year"],
+            "num_sections": len(a["preprocessed"]["sections"]),
+            "num_chunks": len(a["preprocessed"]["chunks"]),
+        }
+        for a in all_articles
+    ]
     with open(OUTPUT_DIR / "index.json", "w", encoding="utf-8") as f:
-        json.dump(all_articles, f, indent=2, ensure_ascii=False)
+        json.dump(index_entries, f, indent=2, ensure_ascii=False)
+    logger.info(f"Saved index with {len(index_entries)} articles")
 
 
 if __name__ == "__main__":
