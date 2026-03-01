@@ -21,7 +21,8 @@ dependencies = [
     "nltk (>=3.9.2,<4.0.0)",
     "spacy (>=3.8.11,<4.0.0)",
     "scispacy (>=0.6.2,<0.7.0)",
-    "langchain-text-splitters (>=1.1.1,<2.0.0)"
+    "langchain-text-splitters (>=1.1.1,<2.0.0)",
+    "pymupdf4llm (>=0.3.4,<0.4.0)"
 ]
 
 [tool.poetry]
