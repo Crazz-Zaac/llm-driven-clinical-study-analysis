@@ -39,17 +39,19 @@ SECTION_HEADINGS = [
     "supplementary",
 ]
 
-# Regex that matches common section headings (numbered or plain).
+# Regex that matches common section headings in plain text, Markdown, or bold.
+# Handles:  "Methods", "1. Methods", "## Methods", "# **Methods**",
+#           "**Methods**", "**1. Introduction**", "## **RESEARCH ...**",
+#           "**2.1 Data Source**", "**2.6 Statistical analysis**"
 _HEADING_RE = re.compile(
-    r"^(?:\d+\.?\s*)?("
+    r"^(?:#{1,4}\s*)?(?:\*{1,2})?(?:\d+(?:\.\d+)*\.?\s*)?("
     + "|".join(re.escape(h) for h in SECTION_HEADINGS)
-    + r")\b",
+    + r")\b[^\n]*$",
     re.IGNORECASE | re.MULTILINE,
-)
-
-# ---------------------------------------------------------------------------
+)  # ---------------------------------------------------------------------------
 # 1. Boilerplate / artefact removal
 # ---------------------------------------------------------------------------
+
 
 def _remove_boilerplate(text: str) -> str:
     """Strip recurring journal artefacts produced by PDF extraction."""
@@ -70,6 +72,7 @@ def _remove_boilerplate(text: str) -> str:
 # ---------------------------------------------------------------------------
 # 2. Remove references, figure/table captions
 # ---------------------------------------------------------------------------
+
 
 def _remove_references_section(text: str) -> str:
     """Cut everything from the References heading onward."""
@@ -119,6 +122,7 @@ def _remove_inline_citations(text: str) -> str:
 # 3. Normalise whitespace & encoding
 # ---------------------------------------------------------------------------
 
+
 def _normalise_text(text: str) -> str:
     """Normalise unicode, collapse whitespace, strip non-printable chars."""
     # Unicode NFC normalisation
@@ -140,9 +144,25 @@ def _normalise_text(text: str) -> str:
 # 4. Section segmentation
 # ---------------------------------------------------------------------------
 
+
+def _clean_heading(raw: str) -> str:
+    """Strip Markdown formatting from a heading line to get a clean name."""
+    h = raw.strip()
+    # Remove leading Markdown heading markers: # ## ### ####
+    h = re.sub(r"^#{1,4}\s*", "", h)
+    # Remove bold / italic markers: ** * _ __
+    h = re.sub(r"[\*_]{1,2}", "", h)
+    # Remove leading numbering: "1." "2."
+    h = re.sub(r"^\d+\.?\s*", "", h)
+    return h.strip().lower()
+
+
 def segment_sections(text: str) -> dict[str, str]:
     """
     Split text into named sections based on headings.
+
+    Handles plain-text, Markdown (## Heading), and bold (**Heading**)
+    heading formats produced by pymupdf4llm.
 
     Returns a dict mapping section name → section body text.
     If no headings are detected the entire text is returned under "full_text".
@@ -160,6 +180,7 @@ def segment_sections(text: str) -> dict[str, str]:
         sections["preamble"] = preamble
 
     for i, m in enumerate(matches):
+        # Use the captured group (heading keyword) as the section name
         name = m.group(1).strip().lower()
         start = m.end()
         end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
@@ -174,6 +195,7 @@ def segment_sections(text: str) -> dict[str, str]:
 # 5. Chunking for LLMs (via LangChain RecursiveCharacterTextSplitter)
 # ---------------------------------------------------------------------------
 
+
 def chunk_text(
     text: str,
     max_chars: int = DEFAULT_CHUNK_SIZE,
@@ -187,10 +209,12 @@ def chunk_text(
     if len(text) <= max_chars:
         return [text]
 
+    SEPARATORS = ["\n\n", "\n", ". ", "; ", ", ", " ", ""]
+
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=max_chars,
         chunk_overlap=overlap,
-        separators=["\n\n", "\n", ". ", "? ", "! ", " ", ""],
+        separators=SEPARATORS,
         keep_separator=True,
     )
     return splitter.split_text(text)
@@ -264,6 +288,7 @@ def extract_biomedical_entities(text: str) -> list[dict[str, str]]:
 # ---------------------------------------------------------------------------
 # Public API – full preprocessing pipeline
 # ---------------------------------------------------------------------------
+
 
 def preprocess(
     raw_text: str,

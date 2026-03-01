@@ -11,10 +11,8 @@ from tqdm import tqdm
 
 from preprocess import preprocess
 
-# PDF and OCR
-from pdfminer.high_level import extract_text
-from pdf2image import convert_from_path
-import pytesseract
+# PDF extraction (layout-aware, handles single & multi-column)
+import pymupdf4llm
 
 
 
@@ -95,19 +93,20 @@ def parse_pmc_xml(xml_path: Path):
     return sections
 
 
-def extract_pdf_text(pdf_path: Path):
-    """Extract text from PDF, fallback to OCR if necessary."""
-    try:
-        text = extract_text(str(pdf_path))
-        if len(text.strip()) < 100:  # likely scanned
-            raise ValueError("PDF seems scanned, using OCR")
-        return text
-    except Exception:
-        text = ""
-        images = convert_from_path(str(pdf_path))
-        for img in images:
-            text += pytesseract.image_to_string(img)
-        return text
+def extract_pdf_text(pdf_path: Path) -> str:
+    """Extract text from PDF using pymupdf4llm (layout-aware).
+
+    Handles single-column and multi-column layouts correctly by
+    using PyMuPDF's spatial text analysis instead of a naive
+    top-to-bottom stream.
+
+    Returns Markdown-formatted text with detected headings,
+    bold/italic, and proper reading order.
+    """
+    md_text = pymupdf4llm.to_markdown(str(pdf_path))
+    if len(md_text.strip()) < 100:
+        logger.warning(f"Very little text extracted from {pdf_path.name}, may be scanned")
+    return md_text
 
 
 # ----------------------------
@@ -139,8 +138,8 @@ def process_article(article):
                 if oa_loc.get("url_for_xml"):
                     xml_path = safe_article_path(article_id, ext="xml")
                     download_file(oa_loc["url_for_xml"], xml_path)
-                    full_text = parse_pmc_xml(xml_path)
-                    full_text = {"full_text": text}
+                    parsed_sections = parse_pmc_xml(xml_path)
+                    full_text = {"full_text": " ".join(parsed_sections.values())}
                 
                 # Fallback PDF
                 elif oa_loc.get("url_for_pdf"):
@@ -180,6 +179,11 @@ def process_article(article):
         f"{article_id}: {len(preprocessed['sections'])} sections, "
         f"{len(preprocessed['chunks'])} chunks"
     )
+
+    # ----- Extract abstract from body if not provided by Europe PMC -----
+    if not abstract and "abstract" in preprocessed.get("sections", {}):
+        abstract = preprocessed["sections"]["abstract"].strip()
+        logger.info(f"Extracted abstract from full text for {article_id}")
 
     # Store metadata + text
     output_json = {
