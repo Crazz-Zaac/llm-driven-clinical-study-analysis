@@ -48,11 +48,9 @@ _HEADING_RE = re.compile(
     + "|".join(re.escape(h) for h in SECTION_HEADINGS)
     + r")\b[^\n]*$",
     re.IGNORECASE | re.MULTILINE,
-)  # ---------------------------------------------------------------------------
-# 1. Boilerplate / artefact removal
-# ---------------------------------------------------------------------------
+) 
 
-
+# Remove Boilerplate / artefact removal
 def _remove_boilerplate(text: str) -> str:
     """Strip recurring journal artefacts produced by PDF extraction."""
     # Form feeds
@@ -69,9 +67,7 @@ def _remove_boilerplate(text: str) -> str:
     return text
 
 
-# ---------------------------------------------------------------------------
-# 2. Remove references, figure/table captions
-# ---------------------------------------------------------------------------
+# Remove references, figure/table captions
 
 
 def _remove_references_section(text: str) -> str:
@@ -118,10 +114,7 @@ def _remove_inline_citations(text: str) -> str:
     return text
 
 
-# ---------------------------------------------------------------------------
-# 3. Normalise whitespace & encoding
-# ---------------------------------------------------------------------------
-
+# Normalise whitespace & encoding
 
 def _normalise_text(text: str) -> str:
     """Normalise unicode, collapse whitespace, strip non-printable chars."""
@@ -140,11 +133,7 @@ def _normalise_text(text: str) -> str:
     return text.strip()
 
 
-# ---------------------------------------------------------------------------
-# 4. Section segmentation
-# ---------------------------------------------------------------------------
-
-
+# Section segmentation
 def _clean_heading(raw: str) -> str:
     """Strip Markdown formatting from a heading line to get a clean name."""
     h = raw.strip()
@@ -174,7 +163,7 @@ def segment_sections(text: str) -> dict[str, str]:
 
     sections: dict[str, str] = {}
 
-    # Text before the first heading
+    # Text before the first heading 
     preamble = text[: matches[0].start()].strip()
     if preamble:
         sections["preamble"] = preamble
@@ -191,11 +180,7 @@ def segment_sections(text: str) -> dict[str, str]:
     return sections
 
 
-# ---------------------------------------------------------------------------
-# 5. Chunking for LLMs (via LangChain RecursiveCharacterTextSplitter)
-# ---------------------------------------------------------------------------
-
-
+#Chunking for LLMs (via LangChain RecursiveCharacterTextSplitter)
 def chunk_text(
     text: str,
     max_chars: int = DEFAULT_CHUNK_SIZE,
@@ -236,9 +221,7 @@ def chunk_sections(
     return result
 
 
-# ---------------------------------------------------------------------------
-# 6. (Optional) Biomedical entity linking via scispaCy
-# ---------------------------------------------------------------------------
+# Optional) Biomedical entity linking via scispaCy
 
 _SCI_NLP: Optional[spacy.language.Language] = None
 
@@ -285,10 +268,7 @@ def extract_biomedical_entities(text: str) -> list[dict[str, str]]:
     ]
 
 
-# ---------------------------------------------------------------------------
 # Public API – full preprocessing pipeline
-# ---------------------------------------------------------------------------
-
 
 def preprocess(
     raw_text: str,
@@ -312,10 +292,10 @@ def preprocess(
     """
     text = raw_text
 
-    # Step 1 – boilerplate
+    # Boilerplate
     text = _remove_boilerplate(text)
 
-    # Step 2 – references, captions, citations
+    # References, captions, citations
     if remove_references:
         text = _remove_references_section(text)
     if remove_captions:
@@ -323,20 +303,20 @@ def preprocess(
     if remove_citations:
         text = _remove_inline_citations(text)
 
-    # Step 3 – normalise
+    # Normalise whitespace & encoding
     text = _normalise_text(text)
 
-    # Step 4 – section segmentation
+    # Section segmentation 
     sections = segment_sections(text)
 
-    # Step 5 – chunking
+    # Chunking for LLMs
     chunks = []
     if chunk:
         chunks = chunk_sections(
             sections, max_chars=max_chunk_chars, overlap=chunk_overlap
         )
 
-    # Step 6 – entity linking (optional)
+    # Entity linking (optional)
     entities = []
     if extract_entities:
         entities = extract_biomedical_entities(text)

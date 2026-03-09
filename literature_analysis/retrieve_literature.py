@@ -15,13 +15,14 @@ from preprocess import preprocess
 import pymupdf4llm
 
 
-
 load_dotenv()  # Load environment variables from .env file
 
 # ----------------------------
 # Configuration
 # ----------------------------
-UNPAYWALL_EMAIL = os.getenv("UNPAYWALL_EMAIL")  # Replace with your email for Unpaywall API
+UNPAYWALL_EMAIL = os.getenv(
+    "UNPAYWALL_EMAIL"
+)  # Replace with your email for Unpaywall API
 OUTPUT_DIR = Path("papers")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
@@ -34,9 +35,7 @@ HEADERS = {
 }
 
 
-# ----------------------------
 # Helper Functions
-# ----------------------------
 def check_oa_status(doi: str):
     """Check Open Access status via Unpaywall API."""
     url = f"https://api.unpaywall.org/v2/{doi}"
@@ -105,13 +104,15 @@ def extract_pdf_text(pdf_path: Path) -> str:
     """
     md_text = pymupdf4llm.to_markdown(str(pdf_path))
     if len(md_text.strip()) < 100:
-        logger.warning(f"Very little text extracted from {pdf_path.name}, may be scanned")
+        logger.warning(
+            f"Very little text extracted from {pdf_path.name}, may be scanned"
+        )
     return md_text
 
 
-# ----------------------------
 # Main Workflow
-# ----------------------------
+
+
 def process_article(article):
     article_id = article.get("pmcid") or article.get("doi")
     doi = article.get("doi")
@@ -133,14 +134,14 @@ def process_article(article):
         if oa_info["is_oa"] and oa_info["oa_location"]:
             oa_loc = oa_info["oa_location"]
             try:
-                
+
                 # Prefer XML
                 if oa_loc.get("url_for_xml"):
                     xml_path = safe_article_path(article_id, ext="xml")
                     download_file(oa_loc["url_for_xml"], xml_path)
                     parsed_sections = parse_pmc_xml(xml_path)
                     full_text = {"full_text": " ".join(parsed_sections.values())}
-                
+
                 # Fallback PDF
                 elif oa_loc.get("url_for_pdf"):
                     pdf_path = safe_article_path(article_id, ext="pdf")
@@ -211,19 +212,19 @@ def process_article(article):
     return output_json
 
 
-# ----------------------------
 # Europe PMC Search
-# ----------------------------
+
+
 def main():
     all_articles = []
 
     with SearchClient() as client:
         results = client.search(
-            query="MIMIC-IV AND Retrospective",     # query to find relevant articles
+            query="MIMIC-IV AND Retrospective",  # query to find relevant articles
             resultType="core",
             format="json",
             abstractText=True,  # Include abstracts in results
-            pageSize=100,       # Fetch 100 results per page
+            pageSize=100,  # Fetch 100 results per page
         )
 
         articles = results["resultList"]["result"]

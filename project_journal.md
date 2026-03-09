@@ -1,7 +1,12 @@
 # Necessary commands
 - `nix-shell` - activate environment with required libraries
 
+---
+
+# Project History
+
 ## 2026-02-25
+
 - project setup
   - Installed necessary packages like: `langchain, beautifulsoup, pyeuropepmc, pdfminer`
   - Search for `query="MIMIC-IV AND Retrospective"` in the Europe PMC
@@ -55,9 +60,14 @@
         "num_chunks": ,
     }
     ```
+---
 
 ## 2026-03-01
+
 - The issue was that `pdfminer` package just reads data _left-to-right, top-to-bottom_. It was totally ignoring the layout of the paper. For two-column layout papers, it was producing garbled results. 
   - Solution: 
     - Installed [`pymupdf4llm`](https://pymupdf.readthedocs.io/en/latest/pymupdf4llm/) package as it supports multi-column pages.
 - Next issue was that respective section's, for example, `Results` data wasn't being read even though the paper had this section. This was because the regex wasn't strong enough.
+
+---
+
