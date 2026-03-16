@@ -71,3 +71,20 @@
 
 ---
 
+## 2026-03-16
+
+- Created `scrape_literatures.py`
+  - `scrape_articles()`: queries nature's journal and returns search results containing paper's url
+  - `extract_article_html()`: extracts the clean structured form of HTML using _Beautifulsoup_
+  - `extract_sections`: extracts useful sections of the paper defined in the `section_patterns` dict
+    - iterates in the order of `["h1", "h2", "h3", "p", "ul", "ol", "table"]`
+    - this assures that smaller headings belongs to the recent biggest heading
+      - For example if the _Methods_ with recent heading is followed by sub-headings, those will be included in the Methods section as well
+    - returns a dictionary of sections
+  - `extract_article_id()`: extracts article id from url 
+  - `save_article()`: saves a JSONL file appending all the incoming literature contents
+  - `process_article()`: main method that calls all other methods
+
+---
+
+
