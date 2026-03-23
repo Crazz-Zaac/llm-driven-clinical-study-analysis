@@ -1,5 +1,6 @@
 # Necessary commands
-- `nix-shell` - activate environment with required libraries
+- Activating environment (locally) - `nix-shell` 
+- Activating environment (on hpc): `source $WORK/poetry-env/bin/activate`
 
 ---
 
@@ -90,5 +91,18 @@
 
 ## 2026-03-22
 
-- 
+- Restructured the project for dockerizing into services
+
+---
+
+## 202603-23
+
+- Setting up project in HPC 
+  - creating virtual environment
+  - installing packages
+
+- Starting with embedding models
+  - decided to use SOTA `sentence-transformers`
+
+--- 
 
