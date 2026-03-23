@@ -188,7 +188,7 @@ if __name__ == "__main__":
     scraper = ArticleScraper()
     query = "MIMIC-IV AND Retrospective"
     print(f"🔍 Searching for: '{query}'")
-    article_urls = scraper.scrape_articles(query, max_pages=1)
+    article_urls = scraper.scrape_articles(query, max_pages=10)
     print(f"\n📊 Found {len(article_urls)} articles")
 
     for i, url in enumerate(article_urls, 1):

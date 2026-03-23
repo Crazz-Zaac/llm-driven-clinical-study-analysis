@@ -1,6 +1,7 @@
 # Necessary commands
 - Activating environment (locally) - `nix-shell` 
 - Activating environment (on hpc): `source $WORK/poetry-env/bin/activate`
+- Generating a hex code (as secret key): `openssl rand -hex 32`
 
 ---
 
@@ -102,7 +103,16 @@
   - installing packages
 
 - Starting with embedding models
+  - decided to use `qdrant`
+    - because additional configurations for storing metadat isn't necessary unlike FAISS
+    - provides APIs for insert/search/update
+    - runs as a service
+    - FAISS is more of a manual configurations
+    
   - decided to use SOTA `sentence-transformers`
+
+- Basic workflow
+  - Chunk data -> Embed it -> store in Vector DB (Qdrant)
 
 --- 
 
