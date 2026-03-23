@@ -213,6 +213,6 @@ __marimo__/
 
 papers/
 
-scraped_articles/
+dataset/
 *.jsonl
 *.json

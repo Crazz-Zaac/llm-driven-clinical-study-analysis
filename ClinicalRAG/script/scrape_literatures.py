@@ -148,16 +148,16 @@ class ArticleScraper:
 
     def save_article(self, output_data: dict):
         """Append article sections to a JSONL file"""
-        output_dir = Path("scraped_articles")
+        output_dir = Path(__file__).parent.parent / "dataset"
         output_dir.mkdir(exist_ok=True)
         output_path = output_dir / "scraped_articles.jsonl"
 
         with open(output_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(output_data, ensure_ascii=False) + "\n")
 
-    def process_article(self, url: str):
         """Process a single article end-to-end"""
         print(f"\n📄 Processing: {url}")
+    def process_article(self, url: str):
 
         # Extract article ID
         article_id = self.extract_article_id(url)

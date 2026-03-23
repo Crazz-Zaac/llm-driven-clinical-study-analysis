@@ -84,7 +84,11 @@
   - `extract_article_id()`: extracts article id from url 
   - `save_article()`: saves a JSONL file appending all the incoming literature contents
   - `process_article()`: main method that calls all other methods
+- After running the `scrape_literatures.py`, a file `scraped_articles/scraped_articles.jsonl` will be created 
 
 ---
 
+## 2026-03-22
+
+- 
 
