@@ -2,9 +2,9 @@
 Masters Thesis
 
 ### Techstack
-- Vector DB 
-    - [Qdrant](https://qdrant.tech/documentation/quickstart/) 
-
+- Langchain 
 - Embedding Model
     - Sentence Transformers
+- Vector DB 
+    - [Qdrant](https://qdrant.tech/documentation/quickstart/) 
 
