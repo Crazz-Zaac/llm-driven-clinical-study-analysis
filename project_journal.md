@@ -112,7 +112,7 @@
   - decided to use SOTA `sentence-transformers`
 
 - Basic workflow
-  - Chunk data -> Embed it -> store in Vector DB (Qdrant)
+  - Chunk data -> Embed it -> store in Qdrant [indexing + storage]
 
 --- 
 

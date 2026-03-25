@@ -1,4 +1,4 @@
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 class TextChunker:
     def __init__(self, chunk_size=1000, chunk_overlap=200):
