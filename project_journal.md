@@ -96,7 +96,7 @@
 
 ---
 
-## 202603-23
+## 2026-03-23
 
 - Setting up project in HPC 
   - creating virtual environment
@@ -115,4 +115,34 @@
   - Chunk data -> Embed it -> store in Qdrant [indexing + storage]
 
 --- 
+
+## 2026-03-29 (Minimal RAG pipeline)
+### Indexing Phase (First Run)
+```
+📄 Documents                             → Load raw data (PDFs, text, etc.)
+      ↓
+✂️ Chunking (LangChain)                  → Split text into smaller meaningful pieces
+      ↓
+🔢 Embeddings (Sentence-Transformers)    → Convert each chunk into a vector
+      ↓
+🗄️ Qdrant (store + index)                → Store vectors + build search index
+```
+
+### Chat/Interaction Phase
+```
+💬 User Query                → User asks a question
+      ↓
+🔢 Embedding                 → Convert query into a vector
+      ↓
+🔍 Qdrant Search (top k)     → Find similar vectors (Top-K chunks)
+      ↓
+📚 Context                   → Collect retrieved chunks
+      ↓
+📝 Prompt Assembly           → Combine context + question
+      ↓
+🤖 LLM                       → Generate answer
+      ↓
+💡 Response                  → Return final answer to user
+```
+
 
