@@ -1,7 +1,7 @@
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as rest
 
-from llm4ehr.app.core import config
+from app.core import config
 
 class QdrantVectorDB:
     """Class to manage interactions with Qdrant vector database"""
