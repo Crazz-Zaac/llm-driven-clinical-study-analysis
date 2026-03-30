@@ -1,10 +1,14 @@
 from pydantic import BaseModel, Field
 from typing import List, Optional
+from enum import Enum
 
-class ChatRole(str):
+
+class ChatRole(str, Enum):
+    """Enumeration for chat message roles"""
     USER = "user"
-    ASSISTANT = "assistant" 
+    ASSISTANT = "assistant"
     SYSTEM = "system"
+
 
 class ChatMessage(BaseModel):
     role: ChatRole = Field(..., description="The role of the message sender (user, assistant, or system).")
