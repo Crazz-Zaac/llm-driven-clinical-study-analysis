@@ -1,12 +1,12 @@
-from app.rag.retrieval.query import QueryService
+from app.rag.services import RetrievalService
 from app.rag.llm.chat_model import ChatModel
 from app.rag.prompts.system_prompt import SYSTEM_PROMPT
 from app.schemas.chat_schema import ChatMessage, ChatRequest, ChatResponse
-from llm4ehr.app.schemas.query_schema import QueryRequest
+from app.schemas.query_schema import QueryRequest
 
 class RAGPipeline:
     def __init__(self):
-        self.query_service = QueryService()
+        self.retrieval_service = RetrievalService()
         self.chat_model = ChatModel()
 
     def run(self, request: ChatRequest) -> ChatResponse:
@@ -16,7 +16,7 @@ class RAGPipeline:
             return ChatResponse(response="No user messages found in the conversation history.", source_documents=None)
         
         last_user_message = user_messages[-1].content
-        query_response = self.query_service.process_query(QueryRequest(query=last_user_message))
+        query_response = self.retrieval_service.retrieve(QueryRequest(query=last_user_message))
 
         # Step 2: Generate a response using the chat model with retrieved documents
         retrieved_docs = "\n".join(query_response.source_documents) if query_response.source_documents else "No relevant documents found."

@@ -1,4 +1,4 @@
-from app.rag.retrieval.query import QueryService
+from app.rag.services.retrieval_service import RetrievalService
 from app.schemas.chat_schema import ChatRequest, ChatResponse, ChatMessage, ChatRole
 from app.rag.llm.chat_model import ChatModel
 from app.rag.prompts.system_prompt import SYSTEM_PROMPT
