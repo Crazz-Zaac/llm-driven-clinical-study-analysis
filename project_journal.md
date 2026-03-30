@@ -181,4 +181,46 @@
   - extracts the texts of retrieved documents
   - Returns response and the source documents
 
+---
 
+## 2026-03-30
+
+- Restructured the project
+  - removed `ingestion/ingestion.py` and instead created `services/ingestion_service.py`
+  - removed `retrieval/query.py` and instead created `services/retrieval_service.p`
+
+- Created tests for testing each rag components
+```
+tests/
+├── test_embedder.py              ✅ Component: Text embeddings
+├── test_ingestion_service.py     ✅ Service: Document ingestion 
+├── test_query_service.py         ✅ Service: Document retrieval 
+├── test_chat_service.py          ✅ Service: Chat handling 
+└── test_rag_pipeline.py          ✅ Pipeline: End-to-end RAG
+```
+- The tests include:
+  - Initialization
+  - Successful retrieval
+  - No results handling
+  - Error handling
+  - Embedding validation
+  - Custom top_k parameter
+
+- Running the Tests
+```bash
+# Run all tests
+pytest tests/ -v
+
+# Run specific test file
+pytest tests/test_ingestion_service.py -v
+pytest tests/test_rag_pipeline.py -v
+
+# Run with coverage
+pytest tests/ --cov=app --cov-report=html
+
+# Run specific test class
+pytest tests/test_rag_pipeline.py::TestRAGPipeline -v
+
+# Run specific test method
+pytest tests/test_rag_pipeline.py::TestRAGPipeline::test_pipeline_run_with_documents -v
+```
