@@ -1,2 +1,8 @@
 dataset/
 scripts/
+
+__pycache__/
+*.pyc
+.git
+.env
+.env.example
