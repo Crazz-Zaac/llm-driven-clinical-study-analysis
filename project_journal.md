@@ -144,5 +144,41 @@
       ↓
 💡 Response                  → Return final answer to user
 ```
+- Created `schemas/ingestion_schema.py `
+  - Ingestion request will have document
+  - Ingestion response will receive a sucess message with metadata
+
+- Created `ingestion/ingestion.py` 
+  - Chunks the document
+  - Embeds each chunk
+  - For each chunk:
+    - creates a metadata
+    - adds it to the batch vector
+  - Upserts each vectors of batch size of 100
+
+- Created `schemas/chat_schema.py`
+  - Created 3 chat roles: user, assistant and system
+  - The chat messages contains role and the content
+  - During chat request, only messages is passed
+  - The chat response will receive response and the documents
+
+- Created `llm/chat_model.py`
+  - call hugging face model
+  - formats the message for prompt based on roles
+  - then it generates the response
+
+- Created `services/chat_service.py`
+  - initiates chat model
+  - generate chat response
+
+- Created `schema/query_schema.py`
+  - It takes query as a request
+  - It returns response, source_documents 
+
+- Created `retrieval/query.py`
+  - it embeds the request
+  - searches the vector db
+  - extracts the texts of retrieved documents
+  - Returns response and the source documents
 
 
