@@ -2,6 +2,7 @@ from app.rag.embeddings.embedder import TextEmbedder
 
 from app.db.qdrant_client import QdrantVectorDB
 from app.schemas.query_schema import QueryRequest, QueryResponse
+from app.core.config import settings
 
 # BM25 Retrieval Service
 # Vector Search Retrieval Service
@@ -11,7 +12,7 @@ class QueryService:
     def __init__(self):
         self.embedder = TextEmbedder()
         self.vector_db = QdrantVectorDB()
-        self.collection_name = "ehr_documents"
+        self.collection_name = settings.QDRANT_COLLECTION_NAME
 
     def process_query(self, request: QueryRequest) -> QueryResponse:
         try:

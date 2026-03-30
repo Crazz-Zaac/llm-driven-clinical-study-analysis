@@ -4,6 +4,7 @@ from chunking.splitter import TextChunker
 from embeddings.embedder import TextEmbedder
 from app.db.qdrant_client import QdrantVectorDB
 from app.schemas.ingestion_schema import IngestionRequest, IngestionResponse
+from app.core.config import settings
 
 class IngestionService:
     """
@@ -14,7 +15,7 @@ class IngestionService:
         self.chunker = TextChunker()
         self.embedder = TextEmbedder()
         self.vector_db = QdrantVectorDB()
-        self.collection_name = "research_documents"
+        self.collection_name = settings.QDRANT_COLLECTION_NAME
         self.vector_db.create_collection(self.collection_name, vector_size=self.embedder.embedding_dim)
 
     def ingest_documents(self, request: IngestionRequest) -> IngestionResponse:
