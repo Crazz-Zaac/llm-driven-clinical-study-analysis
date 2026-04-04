@@ -5,6 +5,8 @@ from app.rag.pipeline import RAGPipeline
 from app.schemas.ingestion_schema import IngestionRequest, IngestionResponse
 from app.schemas.chat_schema import ChatRequest, ChatResponse
 from app.schemas.query_schema import QueryRequest, QueryResponse
+from app.schemas.scrape_schema import ScrapTextRequest, ScrapTextResponse
+from app.rag.services.scrape_service import ScrapTextService
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +125,37 @@ async def rag_chat(request: ChatRequest):
         )
 
 
+# Scraping Endpoint
+@router.post(
+    "/scrape", response_model=ScrapTextResponse, status_code=status.HTTP_200_OK
+)
+async def scrape_article(request: ScrapTextRequest):
+    """
+    Scrape text from a single article URL.
+
+    - **url**: The URL of the article to scrape
+
+    The system will:
+    1. Check if the URL is accessible
+    2. Extract and clean the article HTML
+    3. Extract sections from the article
+    4. Return structured article data
+    """
+    try:
+        logger.info(f"Scraping article from URL: {request.url}")
+        scrap_service = ScrapTextService()
+        response = scrap_service.scrap_text(request)
+
+        logger.info("Article scraped successfully")
+        return response
+    except Exception as e:
+        logger.error(f"Error during scraping: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Scraping error: {str(e)}",
+        )
+
+
 # Information Endpoints
 @router.get("/info")
 async def get_info():
@@ -135,6 +168,7 @@ async def get_info():
             "retrieve": "POST /api/v1/retrieve - Retrieve documents",
             "chat": "POST /api/v1/chat - Chat with model",
             "rag": "POST /api/v1/rag - RAG pipeline (retrieve + chat)",
+            "scrape": "POST /api/v1/scrape - Scrape article text from URL",
             "health": "GET /api/v1/health - Health check",
         },
     }
