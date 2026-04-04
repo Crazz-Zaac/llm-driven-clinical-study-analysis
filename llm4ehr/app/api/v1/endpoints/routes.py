@@ -129,22 +129,24 @@ async def rag_chat(request: ChatRequest):
 @router.post(
     "/scrape", response_model=ScrapTextResponse, status_code=status.HTTP_200_OK
 )
-async def scrape_article(request: ScrapTextRequest):
+async def scrape_article(request: ScrapTextRequest, save: bool = True):
     """
     Scrape text from a single article URL.
 
     - **url**: The URL of the article to scrape
+    - **save**: Optional. If true, save the scraped article to app/data/ with unique filename
 
     The system will:
     1. Check if the URL is accessible
     2. Extract and clean the article HTML
     3. Extract sections from the article
-    4. Return structured article data
+    4. Optionally save to disk with unique filename (article_id_timestamp_uuid.json)
+    5. Return structured article data
     """
     try:
         logger.info(f"Scraping article from URL: {request.url}")
         scrap_service = ScrapTextService()
-        response = scrap_service.scrap_text(request)
+        response = scrap_service.scrap_text(request, save_to_disk=save)
 
         logger.info("Article scraped successfully")
         return response

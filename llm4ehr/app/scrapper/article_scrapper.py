@@ -3,6 +3,8 @@ import random
 import re
 import json
 import logging
+import uuid
+from datetime import datetime
 from pathlib import Path
 import requests
 from bs4 import BeautifulSoup
@@ -155,13 +157,26 @@ class ArticleScraper:
         return match.group(1) if match else url.split("/")[-1]
 
     def save_article(self, output_data: dict):
-        """Append article sections to a JSONL file"""
-        output_dir = Path(__file__).parent.parent / "dataset"
+        """Save article sections to a JSON file with unique name"""
+        # Create data directory inside app (same level as scrapper/)
+        output_dir = Path(__file__).parent.parent / "data"
         output_dir.mkdir(exist_ok=True)
-        output_path = output_dir / "scraped_articles.jsonl"
 
-        with open(output_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(output_data, ensure_ascii=False) + "\n")
+        # Generate unique filename: article_id_timestamp_uuid.json
+        article_id = output_data.get("article_id", "unknown")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        unique_id = str(uuid.uuid4())[:8]
+        filename = f"{article_id}_{timestamp}_{unique_id}.json"
+
+        output_path = output_dir / filename
+
+        try:
+            with open(output_path, "w", encoding="utf-8") as f:
+                json.dump(output_data, f, ensure_ascii=False, indent=2)
+            logger.info(f"Article saved to: {output_path}")
+        except Exception as e:
+            logger.error(f"Failed to save article to {output_path}: {str(e)}")
+            raise
 
     def process_article(self, url: str):
 
@@ -188,6 +203,7 @@ class ArticleScraper:
             )
             return None
         return scrapped_contents
+
 
 # if __name__ == "__main__":
 #     scraper = ArticleScraper()

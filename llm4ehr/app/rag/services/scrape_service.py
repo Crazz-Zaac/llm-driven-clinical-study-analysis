@@ -20,12 +20,15 @@ class ScrapTextService:
     def __init__(self):
         self.scraper = ArticleScraper()
 
-    def scrap_text(self, request: ScrapTextRequest) -> ScrapTextResponse:
+    def scrap_text(
+        self, request: ScrapTextRequest, save_to_disk: bool = False
+    ) -> ScrapTextResponse:
         """
         Scrape text from a single URL.
 
         Args:
             request: ScrapTextRequest containing the URL to scrape
+            save_to_disk: If True, save the scraped article to app/data/ with unique filename
         Returns:
             ScrapTextResponse with the scraped article data
         Raises:
@@ -61,6 +64,18 @@ class ScrapTextService:
                 scraped_at=datetime.now(),
                 sections=sections,
             )
+
+            # Save to disk if requested
+            if save_to_disk:
+                article_data = {
+                    "article_id": article_id,
+                    "url": str(request.url),
+                    "source": "nature",
+                    "scraped_at": datetime.now().isoformat(),
+                    **sections_dict,
+                }
+                self.scraper.save_article(article_data)
+
             message = f"Article scraped successfully: {article_id}"
 
             logger.info(f"Successfully scraped article: {article_id}")
