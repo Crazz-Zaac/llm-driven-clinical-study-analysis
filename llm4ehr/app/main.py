@@ -1,5 +1,5 @@
 """
-FastAPI application entry point for LL4EHR RAG system
+FastAPI application entry point for LLM4EHR RAG system
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 # Create FastAPI app
 app = FastAPI(
-    title="LL4EHR RAG",
+    title="LLM4EHR RAG",
     description="RAG-based system for analyzing clinical studies using LLMs",
     version="0.1.0",
     docs_url="/docs",
@@ -36,7 +36,7 @@ app.include_router(routes.router, prefix="/api/v1", tags=["v1"])
 async def root():
     """Root endpoint"""
     return {
-        "message": "LL4EHR RAG API",
+        "message": "LLM4EHR RAG API",
         "version": "0.1.0",
         "docs": "/docs"
     }
@@ -45,17 +45,17 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    return {"status": "healthy", "service": "clinical-rag-api"}
+    return {"status": "healthy", "service": "llm4ehr-api"}
 
 # Startup event
 @app.on_event("startup")
 async def startup_event():
-    logger.info("LL4EHR RAG API starting up...")
+    logger.info("LLM4EHR RAG API starting up...")
 
 # Shutdown event
 @app.on_event("shutdown")
 async def shutdown_event():
-    logger.info("LL4EHR RAG API shutting down...")
+    logger.info("LLM4EHR RAG API shutting down...")
 
 if __name__ == "__main__":
     import uvicorn

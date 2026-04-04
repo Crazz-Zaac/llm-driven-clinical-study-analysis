@@ -2,6 +2,7 @@
 - Activating environment (locally) - `nix-shell` 
 - Activating environment (on hpc): `source $WORK/poetry-env/bin/activate`
 - Generating a hex code (as secret key): `openssl rand -hex 32`
+- Building docker image from root folder (llm4ehr): `docker build -f docker/Dockerfile -t llm4ehr-app .`
 
 ---
 
@@ -224,3 +225,16 @@ pytest tests/test_rag_pipeline.py::TestRAGPipeline -v
 # Run specific test method
 pytest tests/test_rag_pipeline.py::TestRAGPipeline::test_pipeline_run_with_documents -v
 ```
+
+---
+
+## 2026-04-03
+
+- Updated `docker-compose.yml` 
+- Updated `Dockerfile`
+  - resolved the issue with poetry installation and package installation
+  - resolved the issue with directory structure
+- Successfully built docker image
+
+---
+
