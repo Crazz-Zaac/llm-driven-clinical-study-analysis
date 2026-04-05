@@ -258,3 +258,5 @@ pytest tests/test_rag_pipeline.py::TestRAGPipeline::test_pipeline_run_with_docum
   - allow user to download ollama chat models and vision models
   - allow user to upload PDFs (mulitple uploads) or scrape from nature journal
   - allow user to change model parameter (temperature)
+  
+---
