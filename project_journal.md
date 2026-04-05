@@ -246,3 +246,17 @@ pytest tests/test_rag_pipeline.py::TestRAGPipeline::test_pipeline_run_with_docum
   - Created `api/v1/scrape` endpoint 
 - Saves the scrapped documents to `app/data/` in the container
 
+---
+
+## 2026-04-05
+
+- created frontend container
+- generated frontend in next js using [v0](v0.app)
+- adjusted the UI/UX design to include the following functionalities:
+  - allow user to download and use ollama embedding models 
+  - allow user to use hosted llm models by taking the API keys
+  - allow user to download ollama chat models and vision models
+  - allow user to upload PDFs (mulitple uploads) or scrape from nature journal
+  - allow user to change model parameter (temperature)
+  
+---
