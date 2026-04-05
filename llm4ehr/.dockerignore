@@ -6,3 +6,6 @@ __pycache__/
 .git
 .env
 .env.example
+.next/
+node_modules/
+lib/
