@@ -244,4 +244,5 @@ pytest tests/test_rag_pipeline.py::TestRAGPipeline::test_pipeline_run_with_docum
   - Created `schema/scrape_schema.py`
   - Created `services/scrape_service.py`
   - Created `api/v1/scrape` endpoint 
-- 
+- Saves the scrapped documents to `app/data/` in the container
+
