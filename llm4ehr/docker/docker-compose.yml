@@ -23,8 +23,7 @@ services:
     networks:
       - llm4ehr-network
     labels:
-      - "com.example.service=qdrant"
-
+      - "com.example.service=qdrant"                                                                                                                                                                               
   # FastAPI Application
   backend:
     image: backend:v1

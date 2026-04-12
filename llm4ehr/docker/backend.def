@@ -1,0 +1,40 @@
+Bootstrap: docker
+From: python:3.11-slim
+
+%post
+    export PYTHONDONTWRITEBYTECODE=1
+    export PYTHONUNBUFFERED=1
+    apt-get update
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        libpq-dev \
+        curl
+    rm -rf /var/lib/apt/lists/*
+    
+    curl -sSL https://install.python-poetry.org | python3 -
+    export PATH="/root/.local/bin:$PATH"
+    
+    mkdir -p /app
+
+%files
+    pyproject.toml /app/
+    poetry.lock* /app/
+    app /app/app
+
+%post
+    export PATH="/root/.local/bin:$PATH"
+    cd /app
+    poetry config virtualenvs.create false
+    poetry install --no-interaction --no-ansi
+
+%environment
+    export PATH="/root/.local/bin:$PATH"
+    export PYTHONDONTWRITEBYTECODE=1
+    export PYTHONUNBUFFERED=1
+
+%runscript
+    exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+%labels
+    Author llm4ehr
+    Version v1

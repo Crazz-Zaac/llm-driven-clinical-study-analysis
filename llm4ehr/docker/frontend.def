@@ -1,0 +1,24 @@
+Bootstrap: docker
+From: node:20-alpine
+
+%post
+    mkdir -p /app
+
+%files
+    frontend/package*.json /app/
+    frontend /app/
+
+%post
+    cd /app
+    npm ci --legacy-peer-deps
+    npm run build
+
+%environment
+    NODE_ENV=production
+
+%runscript
+    exec npm start
+
+%labels
+    Author llm4ehr
+    Version v1
