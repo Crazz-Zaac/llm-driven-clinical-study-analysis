@@ -1,4 +1,4 @@
-name: clinical-rag
+name: llm4hr
 
 services:
   # Qdrant Vector Database
@@ -11,8 +11,8 @@ services:
     volumes:
       - qdrant_storage:/qdrant/storage
       - qdrant_snapshots:/qdrant/snapshots
-    environment:
-      - QDRANT_API_KEY=${QDRANT_API_KEY:-default_key}
+    env_file:
+      - ../app/.env  # .env file at project root
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
@@ -21,34 +21,27 @@ services:
       retries: 3
       start_period: 40s
     networks:
-      - clinical-rag-network
+      - llm4ehr-network
     labels:
       - "com.example.service=qdrant"
 
   # FastAPI Application
-  api:
+  backend:
+    image: backend:v1
     build:
       context: ..
-      dockerfile: docker/Dockerfile
-    container_name: clinical-rag-api
+      dockerfile: docker/Dockerfile.backend
+    container_name: llm4ehr-backend
     ports:
-      - "8000:8000"    # FastAPI server
-    volumes:
-      - ../app:/app/app
-      - ../scripts:/app/scripts
-      - ../dataset:/app/dataset
+      - "8001:8000"    # FastAPI server
+    env_file:
+      - ../app/.env
     environment:
       - PYTHONUNBUFFERED=1
       - QDRANT_URL=http://qdrant:6333
-      - QDRANT_API_KEY=${QDRANT_API_KEY:-default_key}
-      - QDRANT_COLLECTION_NAME=${QDRANT_COLLECTION_NAME:-ehr_documents}
-      - HF_API_KEY=${HF_API_KEY:-your-huggingface-key}
-      - HF_MODEL=${HF_MODEL:-mistralai/Mistral-7B-Instruct-v0.1}
-      - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.7}
-      - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-512}
     depends_on:
       qdrant:
-        condition: service_healthy
+        condition: service_started
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -57,27 +50,25 @@ services:
       retries: 3
       start_period: 40s
     networks:
-      - clinical-rag-network
+      - llm4ehr-network
     labels:
-      - "com.example.service=api"
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      - "com.example.service=backend"
 
-  # Optional: Literature Scraper (comment out if not needed)
-  # scraper:
-  #   build:
-  #     context: ..
-  #     dockerfile: docker/Dockerfile
-  #   container_name: clinical-rag-scraper
-  #   volumes:
-  #     - ../scripts:/app/scripts
-  #     - ../dataset:/app/dataset
-  #   environment:
-  #     - PYTHONUNBUFFERED=1
-  #   networks:
-  #     - clinical-rag-network
-  #   command: python scripts/scrape_literatures.py
-  #   profiles:
-  #     - scraper
+  # Next.js frontend
+  frontend:
+    image: frontend:v1
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.frontend
+    container_name: llm4ehr-frontend
+    ports:
+      - "3000:3000"    # Next.js server
+    # env_file:
+    #   - ../.env
+    networks:
+      - llm4ehr-network
+    labels:
+      - "com.example.service=frontend"
 
 volumes:
   qdrant_storage:
@@ -86,5 +77,5 @@ volumes:
     driver: local
 
 networks:
-  clinical-rag-network:
+  llm4ehr-network:
     driver: bridge

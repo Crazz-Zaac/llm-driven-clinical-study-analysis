@@ -2,6 +2,7 @@
 - Activating environment (locally) - `nix-shell` 
 - Activating environment (on hpc): `source $WORK/poetry-env/bin/activate`
 - Generating a hex code (as secret key): `openssl rand -hex 32`
+- Building docker image from root folder (llm4ehr): `docker build -f docker/Dockerfile -t llm4ehr-app .`
 
 ---
 
@@ -224,3 +225,38 @@ pytest tests/test_rag_pipeline.py::TestRAGPipeline -v
 # Run specific test method
 pytest tests/test_rag_pipeline.py::TestRAGPipeline::test_pipeline_run_with_documents -v
 ```
+
+---
+
+## 2026-04-03
+
+- Updated `docker-compose.yml` 
+- Updated `Dockerfile`
+  - resolved the issue with poetry installation and package installation
+  - resolved the issue with directory structure
+- Successfully built docker image
+
+---
+
+## 2026-04-04
+
+- Created schema, services and edpoint for scraping paper from nature journal
+  - Created `schema/scrape_schema.py`
+  - Created `services/scrape_service.py`
+  - Created `api/v1/scrape` endpoint 
+- Saves the scrapped documents to `app/data/` in the container
+
+---
+
+## 2026-04-05
+
+- created frontend container
+- generated frontend in next js using [v0](v0.app)
+- adjusted the UI/UX design to include the following functionalities:
+  - allow user to download and use ollama embedding models 
+  - allow user to use hosted llm models by taking the API keys
+  - allow user to download ollama chat models and vision models
+  - allow user to upload PDFs (mulitple uploads) or scrape from nature journal
+  - allow user to change model parameter (temperature)
+  
+---

@@ -1,8 +1,11 @@
-dataset/
 scripts/
+tests/
 
 __pycache__/
 *.pyc
 .git
 .env
 .env.example
+.next/
+node_modules/
+lib/
