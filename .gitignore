@@ -223,3 +223,6 @@ dataset/
 node_modules
 .next/
 .DS_Store
+
+*.sif
+*.def

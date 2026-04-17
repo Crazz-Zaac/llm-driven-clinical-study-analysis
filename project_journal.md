@@ -260,3 +260,13 @@ pytest tests/test_rag_pipeline.py::TestRAGPipeline::test_pipeline_run_with_docum
   - allow user to change model parameter (temperature)
   
 ---
+
+## 2026-04-06
+
+- Created `.sif` and `.def` files for singularity containerization
+  - `apptainer build backend.sif backend.def`
+  - `apptainer build frontend.sif frontend.def`
+  - `apptainer build qdrant.sif qdrant.def`
+- Copied the singularity images to HPC and ran the containers
+  - `scp backend.sif user@hpc:/path/to/destination`
+- Successfully built singularity image and ran the container in HPC

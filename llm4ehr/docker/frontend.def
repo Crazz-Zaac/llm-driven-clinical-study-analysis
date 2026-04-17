@@ -5,8 +5,17 @@ From: node:20-alpine
     mkdir -p /app
 
 %files
-    frontend/package*.json /app/
-    frontend /app/
+    ../frontend/package*.json /app/
+    ../frontend/app /app/app
+    ../frontend/components /app/components
+    ../frontend/lib /app/lib
+    ../frontend/public /app/public
+    ../frontend/hooks /app/hooks
+    ../frontend/styles /app/styles
+    ../frontend/next.config.mjs /app/
+    ../frontend/tsconfig.json /app/
+    ../frontend/postcss.config.mjs /app/
+    ../frontend/components.json /app/
 
 %post
     cd /app

@@ -9,3 +9,6 @@ __pycache__/
 .next/
 node_modules/
 lib/
+*.sif
+*.def
+*.sbatch
