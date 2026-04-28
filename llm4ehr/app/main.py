@@ -1,22 +1,40 @@
 """
 FastAPI application entry point for LLM4EHR RAG system
 """
+from contextlib import asynccontextmanager
+import logging
+from pathlib import Path
+import sys
+
+project_root = Path(__file__).resolve().parents[1]
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.endpoints import routes
-import logging
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Create FastAPI app
+# Lifespan context manager for startup and shutdown events
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    logger.info("LLM4EHR RAG API starting up...")
+    yield
+    # Shutdown
+    logger.info("LLM4EHR RAG API shutting down...")
+
+# Create FastAPI app with lifespan
 app = FastAPI(
     title="LLM4EHR RAG",
     description="RAG-based system for analyzing clinical studies using LLMs",
     version="0.1.0",
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    lifespan=lifespan
 )
 
 # Add CORS middleware
@@ -46,16 +64,6 @@ async def root():
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "service": "llm4ehr-api"}
-
-# Startup event
-@app.on_event("startup")
-async def startup_event():
-    logger.info("LLM4EHR RAG API starting up...")
-
-# Shutdown event
-@app.on_event("shutdown")
-async def shutdown_event():
-    logger.info("LLM4EHR RAG API shutting down...")
 
 if __name__ == "__main__":
     import uvicorn

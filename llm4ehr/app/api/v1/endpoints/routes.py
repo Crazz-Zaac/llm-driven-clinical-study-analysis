@@ -7,6 +7,7 @@ from app.schemas.chat_schema import ChatRequest, ChatResponse
 from app.schemas.query_schema import QueryRequest, QueryResponse
 from app.schemas.scrape_schema import ScrapTextRequest, ScrapTextResponse
 from app.rag.services.scrape_service import ScrapTextService
+from app.rag.embeddings.embedder import TextEmbedder
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +93,29 @@ async def chat(request: ChatRequest):
             detail=f"Chat error: {str(e)}",
         )
 
+# Embedding Endpoint - for embedding the uploaded documents without ingesting them into the vector database
+@router.post("/embed", status_code=status.HTTP_200_OK)
+async def embed_text(request: IngestionRequest):
+    """
+    Embed text using the embedding model.
+
+    - **documents**: List of document texts to embed
+
+    This endpoint is for testing and debugging the embedding process without ingesting into the vector database.
+    """
+    try:
+        logger.info(f"Embedding {len(request.documents)} documents...")
+        embedder = TextEmbedder()
+        embeddings = embedder.embed(request.documents)
+
+        logger.info("Text embedding completed successfully")
+        return {"embeddings": embeddings}
+    except Exception as e:
+        logger.error(f"Error during embedding: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Embedding error: {str(e)}",
+        )
 
 # RAG Pipeline Endpoints
 @router.post("/rag", response_model=ChatResponse, status_code=status.HTTP_200_OK)

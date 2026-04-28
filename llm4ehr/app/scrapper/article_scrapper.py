@@ -205,9 +205,9 @@ class ArticleScraper:
         return scrapped_contents
 
 
-# if __name__ == "__main__":
-#     scraper = ArticleScraper()
-#     test_url = "https://www.nature.com/articles/s41409-025-02761-5"
-#     article_data = scraper.process_article(test_url)
-#     if article_data:
-#         scraper.save_article(article_data)
+if __name__ == "__main__":
+    scraper = ArticleScraper()
+    test_url = "https://www.nature.com/articles/s41409-025-02761-5"
+    article_data = scraper.process_article(test_url)
+    if article_data:
+        scraper.save_article(article_data)
