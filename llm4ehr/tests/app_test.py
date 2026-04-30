@@ -17,9 +17,6 @@ for file in file_lists:
     embedder = TextEmbedder()
     db = QdrantVectorDB()
 
-    # Embed the abstract
-    embedding = embedder.embed(article['abstract'])
-
     # Create collection if needed
     db.create_collection("articles", vector_size=384)  # all-MiniLM-L6-v2 = 384 dims
 
