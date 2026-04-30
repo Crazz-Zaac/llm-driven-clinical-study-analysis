@@ -1,3 +1,4 @@
+import hashlib
 from app.rag.embeddings.embedder import TextEmbedder
 from app.db.qdrant_client import QdrantVectorDB
 import json
@@ -6,28 +7,36 @@ from pathlib import Path
 # Load JSON
 data_dir = Path(__file__).parent.parent / "app" / "data"
 
-with open(data_dir / "s41409-025-02761-5_20260418_111849_67214a49.json") as f:
-    article = json.load(f)
+file_lists = list(data_dir.glob("*.json"))
 
-# Initialize embedder and DB
-embedder = TextEmbedder()
-db = QdrantVectorDB()
+for file in file_lists:
+    with open(file, "r") as f:  
+        article = json.load(f)
 
-# Embed the abstract
-embedding = embedder.embed(article['abstract'])
+    # Initialize embedder and DB
+    embedder = TextEmbedder()
+    db = QdrantVectorDB()
 
-# Create collection if needed
-db.create_collection("articles", vector_size=384)  # all-MiniLM-L6-v2 = 384 dims
+    # Embed the abstract
+    embedding = embedder.embed(article['abstract'])
 
-# Store in Qdrant
-from qdrant_client.http.models import PointStruct
-point = PointStruct(
-    id=hash(article['article_id']),
-    vector=embedding[0],
-    payload={
-        "article_id": article['article_id'],
-        "url": article['url'],
-        "title": article.get('title', '')
-    }
-)
-db.upsert_vectors("articles", [point])
+    # Create collection if needed
+    db.create_collection("articles", vector_size=384)  # all-MiniLM-L6-v2 = 384 dims
+
+    # Store in Qdrant
+    from qdrant_client.http.models import PointStruct
+    vector = embedder.embed(article['abstract'])  # Get embedding vector for the abstract
+
+
+    point = PointStruct(
+        id=int(hashlib.md5(article["article_id"].encode()).hexdigest(), 16) % (10**12),
+        vector=vector,
+        payload={
+            "article_id": article['article_id'],
+            "url": article['url'],
+            "title": article.get('title', ''),
+            "abstract": article.get('abstract', '')
+        }
+    )
+    db.upsert_vectors("articles", [point])
+    print(f"Processed and stored article: {article['article_id']}")

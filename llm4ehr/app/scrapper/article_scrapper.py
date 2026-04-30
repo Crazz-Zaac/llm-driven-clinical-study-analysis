@@ -207,7 +207,11 @@ class ArticleScraper:
 
 if __name__ == "__main__":
     scraper = ArticleScraper()
-    test_url = "https://www.nature.com/articles/s41409-025-02761-5"
-    article_data = scraper.process_article(test_url)
-    if article_data:
-        scraper.save_article(article_data)
+    test_urls = ["https://www.nature.com/articles/s41409-025-02761-5",
+                 "https://www.nature.com/articles/s41409-025-02762-4",
+                 "https://www.nature.com/articles/s41409-025-02763-3",
+                ]
+    for url in test_urls:
+        article_data = scraper.process_article(url)
+        if article_data:
+            scraper.save_article(article_data)

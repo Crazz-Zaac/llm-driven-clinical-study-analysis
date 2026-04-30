@@ -270,3 +270,15 @@ pytest tests/test_rag_pipeline.py::TestRAGPipeline::test_pipeline_run_with_docum
 - Copied the singularity images to HPC and ran the containers
   - `scp backend.sif user@hpc:/path/to/destination`
 - Successfully built singularity image and ran the container in HPC
+
+
+---
+
+## 2026-04-30
+
+- Adjusted the `tests/app_test.py` to test the embedding of the abstract of the paper
+  - `PYTHONPATH=. python tests/app_test.py`
+  - Qdrant is running: `http://localhost:6333/dashboard#/collections`
+- Created `tests/query_test.py` to test the retrieval of the relevant documents from the vector database
+  - `python -s tests/query_test.py`
+  - The retrieval worked and the results were relevant to the query
