@@ -29,9 +29,11 @@ class QdrantVectorDB:
 
     def search_vectors(self, collection_name: str, query_vector: list, top_k: int = 5):
         """Search for similar vectors in the specified collection"""
-        return self.client.query_points(
+        response = self.client.query_points(
             collection_name=collection_name,
             query=query_vector,
             limit=top_k,
             with_payload=True,
         )
+        # returning the points with payload for further processing in the retrieval service
+        return response.points

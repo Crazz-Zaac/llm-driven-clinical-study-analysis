@@ -20,20 +20,38 @@ class RAGPipeline:
 
         last_user_message = user_messages[-1].content
 
+        print("\n=== LAST USER MESSAGE ===")
+        print(last_user_message)
+
         query_response = self.retrieval_service.retrieve(
             QueryRequest(query=last_user_message)
         )
 
+        docs = query_response.source_documents or []
+
         retrieved_docs = "\n\n".join(f"""
-    Title: {doc.get('title', '')}
-    Article ID: {doc.get('article_id', '')}
-    URL: {doc.get('url', '')}
-    Abstract: {doc.get('abstract', '')}
-    """ for doc in (query_response.source_documents or []))
+        [Document: {i+1}]
+        Title: {doc.title}
+        Article ID: {doc.article_id}
+        URL: {doc.url}
+        Abstract: {doc.abstract}
+        """ for i, doc in enumerate(docs))
+
+        print("\n=== RETRIEVED DOCS ===")
+        print(retrieved_docs)
+
+        sys_prompt = f"""
+        {SYSTEM_PROMPT}
+        You MUST answer using ONLY the context below.
+        If the answer is not found, say "Not found in retrieved documents."
+
+        Context:
+        {retrieved_docs}
+        """
 
         chat_request = ChatRequest(
             messages=[
-                ChatMessage(role="system", content=SYSTEM_PROMPT),
+                ChatMessage(role="system", content=sys_prompt),
                 ChatMessage(
                     role="user",
                     content=f"""
@@ -47,4 +65,11 @@ class RAGPipeline:
             ]
         )
 
-        return self.chat_model.generate_response(chat_request)
+        response = self.chat_model.generate_response(chat_request)
+
+        return ChatResponse(
+            response=response.response,
+            source_documents=[
+                doc.model_dump() for doc in query_response.source_documents
+            ],
+        )
