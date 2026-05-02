@@ -276,9 +276,29 @@ pytest tests/test_rag_pipeline.py::TestRAGPipeline::test_pipeline_run_with_docum
 
 ## 2026-04-30
 
-- Adjusted the `tests/app_test.py` to test the embedding of the abstract of the paper
-  - `PYTHONPATH=. python tests/app_test.py`
+- Adjusted the `tests/embedder_test.py` to test the embedding of the abstract of the paper
+  - `PYTHONPATH=. python tests/embedder_test.py`
   - Qdrant is running: `http://localhost:6333/dashboard#/collections`
 - Created `tests/query_test.py` to test the retrieval of the relevant documents from the vector database
   - `python -s tests/query_test.py`
   - The retrieval worked and the results were relevant to the query
+
+---
+
+### 2026-05-02
+- Updated `llm/chat_model.py`
+  - Initially the `generate_response` method was only taking the question as input and generating a response without considering the retrieved documents. This was not ideal for a RAG pipeline where the LLM should generate responses based on the retrieved context.
+  - Updated the `generate_response` method to take both the question and the retrieved documents as input. The retrieved documents are now included in the prompt that is sent to the LLM, allowing it to generate more informed and accurate responses based on the provided context.
+-  Adjusted the `qdrant_client.py`
+   -  Initially the client response was being returned as a list of dictionaries. This was causing issues in the retrieval service when trying to access the document attributes.
+   -  Updated to return points with payload as a list of `Document` objects instead of dictionaries. This allows for easier access to document attributes like `title`, `abstract`, etc. in the retrieval service.
+- Updated the `schemas/query_schema.py`
+  - Updated the `QueryResponse` schema to have `source_documents` as a list of `RetrievedDocument` objects instead of a list of dictionaries. 
+  - The `RetrievedDocument` schema contains fields like `title`, `abstract`, `article_id`, etc. which are relevant for the retrieved documents.
+- Updated the `retrieval_service.py`
+  - In the retrieval service, after getting the search results from Qdrant, I now create a list of `Document` objects from the retrieved points. Each `Document` object contains the relevant metadata and content from the retrieved chunks.
+- Updated `schemas/chat_schema.py`
+  - Updated the `ChatResponse` schema to have `source_documents` as a list of dictionaries instead of a list of strings. Each dictionary represents a retrieved document with its metadata and content. 
+-  Updated the `pipeline.py`
+   - In the pipeline, when assembling the retrieved documents for the prompt, I now access the document attributes directly from the `Document` objects instead of trying to access them as dictionary keys. This allows for a more structured and clear way to format the retrieved documents in the prompt.
+- Updated `system_prompt.py`
