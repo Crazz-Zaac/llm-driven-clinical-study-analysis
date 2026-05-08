@@ -70,6 +70,6 @@ class RAGPipeline:
         return ChatResponse(
             response=response.response,
             source_documents=[
-                doc.model_dump() for doc in query_response.source_documents
+                doc.model_dump(exclude=["abstract"]) for doc in query_response.source_documents
             ],
         )

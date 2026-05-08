@@ -10,7 +10,6 @@ import requests
 from bs4 import BeautifulSoup
 import trafilatura
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -67,6 +66,9 @@ class ArticleScraper:
             response = self.session.get(url, timeout=10)
             response.raise_for_status()
 
+            metadata = trafilatura.extract_metadata(response.text)
+            title = metadata.title if metadata and metadata.title else "No Title"
+
             # Use trafilatura to clean the HTML but keep structure
             cleaned_html = trafilatura.extract(
                 response.text,
@@ -77,7 +79,7 @@ class ArticleScraper:
                 include_comments=False,
             )
 
-            return cleaned_html
+            return cleaned_html, title
         except requests.exceptions.RequestException as e:
             print(f"Request failed for {url}: {e}")
             return ""
@@ -184,7 +186,7 @@ class ArticleScraper:
         article_id = self.extract_article_id(url)
 
         # Get cleaned HTML
-        html_content = self.extract_article_html(url)
+        html_content, article_title = self.extract_article_html(url)
         if not html_content:
             print(f"Failed to extract HTML from {url}")
             return
@@ -196,10 +198,15 @@ class ArticleScraper:
         # Check if all the sections have content
         if all(sections.values()):
             print(f"Saving contents for article ID: {article_id}")
-            scrapped_contents = {"article_id": article_id, "url": url, **sections}
+            scrapped_contents = {
+                "article_id": article_id,
+                "url": url,
+                "title": article_title,
+                **sections,
+            }
         else:
             print(
-                f"Found missing sections for article ID: {article_id}, skipping save."
+                f"Found missing {', '.join([k for k, v in sections.items() if not v])} for article ID: {article_id}, skipping save."
             )
             return None
         return scrapped_contents
@@ -207,10 +214,11 @@ class ArticleScraper:
 
 if __name__ == "__main__":
     scraper = ArticleScraper()
-    test_urls = ["https://www.nature.com/articles/s41409-025-02761-5",
-                 "https://www.nature.com/articles/s41409-025-02762-4",
-                 "https://www.nature.com/articles/s41409-025-02763-3",
-                ]
+    test_urls = [
+        "https://www.nature.com/articles/s41409-025-02761-5",
+        "https://www.nature.com/articles/s41409-025-02762-4",
+        "https://www.nature.com/articles/s41409-025-02763-3",
+    ]
     for url in test_urls:
         article_data = scraper.process_article(url)
         if article_data:

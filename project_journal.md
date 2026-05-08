@@ -276,8 +276,8 @@ pytest tests/test_rag_pipeline.py::TestRAGPipeline::test_pipeline_run_with_docum
 
 ## 2026-04-30
 
-- Adjusted the `tests/embedder_test.py` to test the embedding of the abstract of the paper
-  - `PYTHONPATH=. python tests/embedder_test.py`
+- Adjusted the `tests/embedding_test.py` to test the embedding of the abstract of the paper
+  - `PYTHONPATH=. python tests/embedding_test.py`
   - Qdrant is running: `http://localhost:6333/dashboard#/collections`
 - Created `tests/query_test.py` to test the retrieval of the relevant documents from the vector database
   - `python -s tests/query_test.py`
@@ -302,3 +302,10 @@ pytest tests/test_rag_pipeline.py::TestRAGPipeline::test_pipeline_run_with_docum
 -  Updated the `pipeline.py`
    - In the pipeline, when assembling the retrieved documents for the prompt, I now access the document attributes directly from the `Document` objects instead of trying to access them as dictionary keys. This allows for a more structured and clear way to format the retrieved documents in the prompt.
 - Updated `system_prompt.py`
+
+
+---
+
+### 2026-05-08
+
+- 

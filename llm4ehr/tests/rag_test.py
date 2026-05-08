@@ -7,7 +7,7 @@ def run_rag():
 
     request = ChatRequest(
         messages=[
-            ChatMessage(role="user", content="What is Anti-T-lymphocyte globulin (ATLG)?"),
+            ChatMessage(role="user", content="How many patients were included in the study of anti-T-lymphocyte?"),
         ]
     )
 
