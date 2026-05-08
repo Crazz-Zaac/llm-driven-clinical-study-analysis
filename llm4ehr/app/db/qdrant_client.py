@@ -37,3 +37,26 @@ class QdrantVectorDB:
         )
         # returning the points with payload for further processing in the retrieval service
         return response.points
+
+    def delete_collection(self, collection_name: str):
+        """Delete an entire collection from Qdrant"""
+        if self.client.collection_exists(collection_name):
+            self.client.delete_collection(collection_name=collection_name)
+
+    def delete_by_article_ids(
+        self, collection_name: str, article_ids: list[str]
+    ) -> None:
+        """Delete points matching article IDs from a collection"""
+        if not article_ids:
+            return
+        self.client.delete(
+            collection_name=collection_name,
+            points_selector=rest.Filter(
+                must=[
+                    rest.FieldCondition(
+                        key="article_id",
+                        match=rest.MatchAny(any=article_ids),
+                    )
+                ]
+            ),
+        )
