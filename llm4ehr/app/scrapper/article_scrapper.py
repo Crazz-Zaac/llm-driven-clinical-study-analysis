@@ -161,7 +161,7 @@ class ArticleScraper:
     def save_article(self, output_data: dict):
         """Save article sections to a JSON file with unique name"""
         # Create data directory inside app (same level as scrapper/)
-        output_dir = Path(__file__).parent.parent / "data"
+        output_dir = Path(__file__).parent.parent / "data" / "scrapped_articles"
         output_dir.mkdir(exist_ok=True)
 
         # Generate unique filename: article_id_timestamp_uuid.json
@@ -206,7 +206,7 @@ class ArticleScraper:
             }
         else:
             print(
-                f"Found missing {', '.join([k for k, v in sections.items() if not v])} for article ID: {article_id}, skipping save."
+                f"Found missing [{', '.join([k for k, v in sections.items() if not v])} for article ID: {article_id}], skipping save."
             )
             return None
         return scrapped_contents
