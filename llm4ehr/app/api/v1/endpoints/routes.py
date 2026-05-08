@@ -1,10 +1,22 @@
 from fastapi import APIRouter, HTTPException, status
 import logging
-from app.rag.services import ChatService, IngestionService, RetrievalService
+from pathlib import Path
+from app.rag.services import (
+    ChatService,
+    IngestionService,
+    IndexingService,
+    RetrievalService,
+)
 from app.rag.pipeline import RAGPipeline
 from app.schemas.ingestion_schema import IngestionRequest, IngestionResponse
 from app.schemas.chat_schema import ChatRequest, ChatResponse
 from app.schemas.query_schema import QueryRequest, QueryResponse
+from app.schemas.indexing_schema import (
+    IndexRequest,
+    IndexResponse,
+    DeleteIndexRequest,
+    DeleteIndexResponse,
+)
 from app.schemas.scrape_schema import ScrapTextRequest, ScrapTextResponse
 from app.rag.services.scrape_service import ScrapTextService
 from app.rag.embeddings.embedder import TextEmbedder
@@ -45,6 +57,75 @@ async def ingest_documents(request: IngestionRequest):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Ingestion error: {str(e)}",
+        )
+
+
+# Indexing Endpoints
+@router.post("/index", response_model=IndexResponse, status_code=status.HTTP_200_OK)
+async def index_documents(request: IndexRequest):
+    """
+    Index documents and save embeddings to disk.
+
+    - **documents**: List of structured documents to index
+    """
+    try:
+        logger.info(f"Indexing {len(request.documents)} documents...")
+        indexing_service = IndexingService()
+        response = indexing_service.index_documents(
+            [doc.model_dump() for doc in request.documents]
+        )
+        return response
+    except Exception as e:
+        logger.error(f"Error during indexing: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Indexing error: {str(e)}",
+        )
+
+
+@router.post("/index/stop", status_code=status.HTTP_200_OK)
+async def stop_indexing():
+    """Stop indexing requests for the current process."""
+    try:
+        indexing_service = IndexingService()
+        indexing_service.stop_indexing()
+        return {"success": True, "message": "Indexing stop requested"}
+    except Exception as e:
+        logger.error(f"Error stopping indexing: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Stop indexing error: {str(e)}",
+        )
+
+
+@router.delete(
+    "/index", response_model=DeleteIndexResponse, status_code=status.HTTP_200_OK
+)
+async def delete_indexed_documents(request: DeleteIndexRequest):
+    """Delete indexed documents or entire collection."""
+    try:
+        indexing_service = IndexingService()
+
+        if request.delete_all:
+            deleted_files = [
+                str(p) for p in indexing_service.embeddings_dir.glob("*.json")
+            ]
+            for file_path in deleted_files:
+                Path(file_path).unlink(missing_ok=True)
+            indexing_service.delete_collection()
+            return {
+                "success": True,
+                "deleted_count": len(deleted_files),
+                "deleted_files": deleted_files,
+            }
+
+        response = indexing_service.delete_indexed_documents(request.article_ids)
+        return response
+    except Exception as e:
+        logger.error(f"Error deleting indexed documents: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Delete indexing error: {str(e)}",
         )
 
 
@@ -93,6 +174,7 @@ async def chat(request: ChatRequest):
             detail=f"Chat error: {str(e)}",
         )
 
+
 # Embedding Endpoint - for embedding the uploaded documents without ingesting them into the vector database
 @router.post("/embed", status_code=status.HTTP_200_OK)
 async def embed_text(request: IngestionRequest):
@@ -116,6 +198,7 @@ async def embed_text(request: IngestionRequest):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Embedding error: {str(e)}",
         )
+
 
 # RAG Pipeline Endpoints
 @router.post("/rag", response_model=ChatResponse, status_code=status.HTTP_200_OK)
