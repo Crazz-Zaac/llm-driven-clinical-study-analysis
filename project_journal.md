@@ -308,4 +308,17 @@ pytest tests/test_rag_pipeline.py::TestRAGPipeline::test_pipeline_run_with_docum
 
 ### 2026-05-08
 
-- 
+- Updated the `services/ingestion_service.py`
+  - In the ingestion service, I updated the method that processes the document to also include the `conclusion` section in addition to the `abstract`, `methods`, and `results`. 
+  - I was previously looping chunk by chunk and creating the metadata which was not efficient and slower. Now I make a list of all chunks, embed them together then loop throug the chunk and embeddings together to create the metadata and the point for upserting. This is more efficient as it reduces the number of calls to the embedding model and allows for batch processing of chunks.
+- Created the `services/indexing_service.py`
+  - created methods to index the documents into the vector database
+  - created methods to delete the collection and the indexed files
+  - created methods to save the embeddings in the local directory as JSON files
+- Updated the `schemas/indexing_schema.py`  
+  - Updated the `DocumentSchema` to include a new field for `conclusion`
+- Updated the `scrapper/article_scrapper.py`
+  - Previously I hadn't extracted the title of the article. Now I am extracting the `title` of the article and including it in the scrapped contents  
+- Updated the `api/v1/endpoints/routes.py`
+  - Added a new endpoint for deleting all indexed documents and the collection in the vector database. This allows for a clean slate when needed, especially during testing or when re-indexing documents. The endpoint will delete all JSON files in the embeddings directory and also delete the collection from Qdrant.
+  - This will be later rewired to frontend to allow users to clear the indexed documents and start fresh when needed.
