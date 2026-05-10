@@ -30,9 +30,28 @@ class ScrapTextRequest(BaseModel):
     url: HttpUrl
 
 
+class ScrapTextBatchRequest(BaseModel):
+    urls: List[HttpUrl]
+
+
 class ScrapTextResponse(BaseModel):
     article: ArticleSchema
     message: Optional[str] = "Article scraped successfully"
+
+
+class ScrapTextBatchResponse(BaseModel):
+    articles: List[ArticleSchema]
+    message: Optional[str] = "Articles scraped successfully"
+
+
+class ScrapTextListItem(BaseModel):
+    article_id: str
+    title: Optional[str] = None
+    url: HttpUrl
+
+
+class ScrapTextListResponse(BaseModel):
+    articles: List[ScrapTextListItem]
 
 
 class ScrapTextErrorResponse(BaseModel):

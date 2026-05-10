@@ -16,6 +16,13 @@ class IndexRequest(BaseModel):
     documents: List[IndexDocument] = Field(..., description="Documents to index")
 
 
+class IndexFromScrapedRequest(BaseModel):
+    article_ids: List[str] = Field(
+        default_factory=list,
+        description="Article IDs to load from data/scrapped_articles",
+    )
+
+
 class IndexResponse(BaseModel):
     success: bool = Field(..., description="Whether indexing succeeded")
     indexed_count: int = Field(..., description="Number of documents indexed")

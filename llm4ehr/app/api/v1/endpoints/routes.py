@@ -14,10 +14,15 @@ from app.schemas.query_schema import QueryRequest, QueryResponse
 from app.schemas.indexing_schema import (
     IndexRequest,
     IndexResponse,
+    IndexFromScrapedRequest,
     DeleteIndexRequest,
     DeleteIndexResponse,
 )
-from app.schemas.scrape_schema import ScrapTextRequest, ScrapTextResponse
+from app.schemas.scrape_schema import (
+    ScrapTextBatchRequest,
+    ScrapTextBatchResponse,
+    ScrapTextListResponse,
+)
 from app.rag.services.scrape_service import ScrapTextService
 from app.rag.embeddings.embedder import TextEmbedder
 
@@ -80,6 +85,28 @@ async def index_documents(request: IndexRequest):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Indexing error: {str(e)}",
+        )
+
+
+@router.post(
+    "/index/from-scraped", response_model=IndexResponse, status_code=status.HTTP_200_OK
+)
+async def index_from_scraped(request: IndexFromScrapedRequest):
+    """
+    Index documents by loading them from data/scrapped_articles.
+
+    - **article_ids**: List of article IDs to index
+    """
+    try:
+        logger.info(f"Indexing {len(request.article_ids)} scraped documents...")
+        indexing_service = IndexingService()
+        response = indexing_service.index_from_scraped(request.article_ids)
+        return response
+    except Exception as e:
+        logger.error(f"Error during index-from-scraped: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Index-from-scraped error: {str(e)}",
         )
 
 
@@ -232,36 +259,47 @@ async def rag_chat(request: ChatRequest):
         )
 
 
-# Scraping Endpoint
 @router.post(
-    "/scrape", response_model=ScrapTextResponse, status_code=status.HTTP_200_OK
+    "/scrape/batch",
+    response_model=ScrapTextBatchResponse,
+    status_code=status.HTTP_200_OK,
 )
-async def scrape_article(request: ScrapTextRequest, save: bool = True):
+async def scrape_articles(request: ScrapTextBatchRequest, save: bool = True):
     """
-    Scrape text from a single article URL.
+    Scrape text from multiple article URLs.
 
-    - **url**: The URL of the article to scrape
-    - **save**: Optional. If true, save the scraped article to app/data/ with unique filename
-
-    The system will:
-    1. Check if the URL is accessible
-    2. Extract and clean the article HTML
-    3. Extract sections from the article
-    4. Optionally save to disk with unique filename (article_id_timestamp_uuid.json)
-    5. Return structured article data
+    - **urls**: List of URLs to scrape
+    - **save**: Optional. If true, save scraped articles to data/scrapped_articles/
     """
     try:
-        logger.info(f"Scraping article from URL: {request.url}")
+        logger.info(f"Scraping {len(request.urls)} articles")
         scrap_service = ScrapTextService()
-        response = scrap_service.scrap_text(request, save_to_disk=save)
+        response = scrap_service.scrap_text_batch(request, save_to_disk=save)
 
-        logger.info("Article scraped successfully")
+        logger.info("Batch scraping completed successfully")
         return response
     except Exception as e:
-        logger.error(f"Error during scraping: {str(e)}")
+        logger.error(f"Error during batch scraping: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Scraping error: {str(e)}",
+            detail=f"Batch scraping error: {str(e)}",
+        )
+
+
+@router.get(
+    "/scrape/list", response_model=ScrapTextListResponse, status_code=status.HTTP_200_OK
+)
+async def list_scraped_articles():
+    """List scraped articles saved on disk."""
+    try:
+        scrap_service = ScrapTextService()
+        articles = scrap_service.list_scraped_articles()
+        return {"articles": articles}
+    except Exception as e:
+        logger.error(f"Error listing scraped articles: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"List scraped articles error: {str(e)}",
         )
 
 
@@ -274,10 +312,13 @@ async def get_info():
         "version": "0.1.0",
         "endpoints": {
             "ingest": "POST /api/v1/ingest - Ingest documents",
+            "index": "POST /api/v1/index - Index provided documents",
+            "index_from_scraped": "POST /api/v1/index/from-scraped - Index saved scraped articles",
             "retrieve": "POST /api/v1/retrieve - Retrieve documents",
             "chat": "POST /api/v1/chat - Chat with model",
             "rag": "POST /api/v1/rag - RAG pipeline (retrieve + chat)",
-            "scrape": "POST /api/v1/scrape - Scrape article text from URL",
+            "scrape_batch": "POST /api/v1/scrape/batch - Scrape article text from URLs",
+            "scrape_list": "GET /api/v1/scrape/list - List scraped articles",
             "health": "GET /api/v1/health - Health check",
         },
     }

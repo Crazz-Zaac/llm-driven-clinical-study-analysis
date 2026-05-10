@@ -13,6 +13,9 @@ class Config:
     QDRANT_COLLECTION_NAME = os.getenv("QDRANT_COLLECTION_NAME", "ehr_documents")
 
     EMBEDDINGS_DIR = os.getenv("EMBEDDINGS_DIR", "app/data/embeddings")
+    SCRAPED_ARTICLES_DIR = os.getenv(
+        "SCRAPED_ARTICLES_DIR", "app/data/scrapped_articles"
+    )
 
     HF_API_KEY = os.getenv("HF_API_KEY", "")
     HF_MODEL = os.getenv("HF_MODEL", "mistralai/Mistral-7B-Instruct-v0.1")

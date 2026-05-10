@@ -7,6 +7,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 import requests
+from app.core.config import settings
 from bs4 import BeautifulSoup
 import trafilatura
 
@@ -161,8 +162,10 @@ class ArticleScraper:
     def save_article(self, output_data: dict):
         """Save article sections to a JSON file with unique name"""
         # Create data directory inside app (same level as scrapper/)
-        output_dir = Path(__file__).parent.parent / "data" / "scrapped_articles"
-        output_dir.mkdir(exist_ok=True)
+        output_dir = Path(settings.SCRAPED_ARTICLES_DIR)
+        if not output_dir.is_absolute():
+            output_dir = Path(__file__).resolve().parents[1] / output_dir
+        output_dir.mkdir(parents=True, exist_ok=True)
 
         # Generate unique filename: article_id_timestamp_uuid.json
         article_id = output_data.get("article_id", "unknown")
@@ -212,14 +215,15 @@ class ArticleScraper:
         return scrapped_contents
 
 
-if __name__ == "__main__":
-    scraper = ArticleScraper()
-    test_urls = [
-        "https://www.nature.com/articles/s41409-025-02761-5",
-        "https://www.nature.com/articles/s41409-025-02762-4",
-        "https://www.nature.com/articles/s41409-025-02763-3",
-    ]
-    for url in test_urls:
-        article_data = scraper.process_article(url)
-        if article_data:
-            scraper.save_article(article_data)
+# if __name__ == "__main__":
+#     scraper = ArticleScraper()
+#     test_urls = [
+# "https://www.nature.com/articles/s41409-025-02761-5",
+# "https://www.nature.com/articles/s41409-025-02762-4",
+# "https://www.nature.com/articles/s41598-026-42395-1",
+# "https://www.nature.com/articles/s41409-025-02763-3",
+#     ]
+#     for url in test_urls:
+#         article_data = scraper.process_article(url)
+#         if article_data:
+#             scraper.save_article(article_data)
