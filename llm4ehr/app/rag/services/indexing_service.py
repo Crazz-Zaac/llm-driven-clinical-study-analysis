@@ -79,6 +79,11 @@ class IndexingService:
             "embedding_files": embedding_files,
         }
 
+    def index_from_scraped(self, article_ids: list[str]) -> dict[str, Any]:
+        """Load scraped articles from disk by article ID and index them."""
+        documents = self._load_scraped_documents(article_ids)
+        return self.index_documents(documents)
+
     def _build_combined_text(self, doc: dict[str, Any]) -> str:
         return (
             "Title: {title}\n\n"
@@ -113,6 +118,25 @@ class IndexingService:
     def _embedding_file_path(self, article_id: str) -> Path:
         file_id = hashlib.md5(article_id.encode()).hexdigest()
         return self.embeddings_dir / f"{file_id}.json"
+
+    def _load_scraped_documents(self, article_ids: list[str]) -> list[dict[str, Any]]:
+        scraped_dir = Path(__file__).resolve().parents[3] / "data" / "scrapped_articles"
+        if not scraped_dir.exists():
+            return []
+
+        documents: list[dict[str, Any]] = []
+        for article_id in article_ids:
+            matches = sorted(
+                scraped_dir.glob(f"{article_id}_*.json"),
+                key=lambda path: path.stat().st_mtime,
+                reverse=True,
+            )
+            if not matches:
+                continue
+            with open(matches[0], "r", encoding="utf-8") as handle:
+                documents.append(json.load(handle))
+
+        return documents
 
     def _make_point_id(self, article_id: str) -> int:
         return int(hashlib.md5(article_id.encode()).hexdigest(), 16) % (10**12)
