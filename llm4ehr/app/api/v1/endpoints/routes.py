@@ -133,7 +133,7 @@ async def delete_indexed_documents(request: DeleteIndexRequest):
     try:
         indexing_service = IndexingService()
 
-        if request.delete_all:
+        if request.delete_all or not request.article_ids:
             deleted_files = [
                 str(p) for p in indexing_service.embeddings_dir.glob("*.json")
             ]

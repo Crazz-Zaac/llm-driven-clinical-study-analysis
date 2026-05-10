@@ -120,7 +120,9 @@ class IndexingService:
         return self.embeddings_dir / f"{file_id}.json"
 
     def _load_scraped_documents(self, article_ids: list[str]) -> list[dict[str, Any]]:
-        scraped_dir = Path(__file__).resolve().parents[3] / "data" / "scrapped_articles"
+        scraped_dir = Path(settings.SCRAPED_ARTICLES_DIR)
+        if not scraped_dir.is_absolute():
+            scraped_dir = Path(__file__).resolve().parents[3] / scraped_dir
         if not scraped_dir.exists():
             return []
 
