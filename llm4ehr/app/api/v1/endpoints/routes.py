@@ -183,7 +183,7 @@ async def retrieve_documents(request: QueryRequest):
 @router.post("/chat", response_model=ChatResponse, status_code=status.HTTP_200_OK)
 async def chat(request: ChatRequest):
     """
-    Chat endpoint using the chat model.
+    Chat endpoint to chat with the model but without retrieval. Useful for testing the chat model directly.
 
     - **messages**: List of chat messages with role and content
     """
