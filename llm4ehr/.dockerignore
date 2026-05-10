@@ -1,5 +1,6 @@
 scripts/
 tests/
+data/
 
 __pycache__/
 *.pyc

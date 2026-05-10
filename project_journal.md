@@ -285,7 +285,7 @@ pytest tests/test_rag_pipeline.py::TestRAGPipeline::test_pipeline_run_with_docum
 
 ---
 
-### 2026-05-02
+## 2026-05-02
 - Updated `llm/chat_model.py`
   - Initially the `generate_response` method was only taking the question as input and generating a response without considering the retrieved documents. This was not ideal for a RAG pipeline where the LLM should generate responses based on the retrieved context.
   - Updated the `generate_response` method to take both the question and the retrieved documents as input. The retrieved documents are now included in the prompt that is sent to the LLM, allowing it to generate more informed and accurate responses based on the provided context.
@@ -306,7 +306,7 @@ pytest tests/test_rag_pipeline.py::TestRAGPipeline::test_pipeline_run_with_docum
 
 ---
 
-### 2026-05-08
+## 2026-05-08
 
 - Updated the `services/ingestion_service.py`
   - In the ingestion service, I updated the method that processes the document to also include the `conclusion` section in addition to the `abstract`, `methods`, and `results`. 
@@ -322,3 +322,17 @@ pytest tests/test_rag_pipeline.py::TestRAGPipeline::test_pipeline_run_with_docum
 - Updated the `api/v1/endpoints/routes.py`
   - Added a new endpoint for deleting all indexed documents and the collection in the vector database. This allows for a clean slate when needed, especially during testing or when re-indexing documents. The endpoint will delete all JSON files in the embeddings directory and also delete the collection from Qdrant.
   - This will be later rewired to frontend to allow users to clear the indexed documents and start fresh when needed.
+  
+  ---
+
+## 2026-05-10
+
+- Updated `indexing_schema.py`
+  - Added `IndexFromScrapedRequest` to include a list of article ids
+- Updated `indexing_service.py`
+  - Added a method `index_from_scraped` which takes the scrapped articles from the `data/` directory, processes them and indexes them into the vector database. This method will be called after scraping new articles to ensure that they are indexed and available for retrieval.
+- Updated `scrape_service.py`
+  - Added `scrap_text_batch` method which allows for scraping multiple articles in a batch. This method will loop through a list of article URLs, scrape each one and save the contents to the `data/` directory. 
+  - Added `list_scraped_articles` method which lists all the scrapped articles available in the `data/` directory. This can be useful for keeping track of what articles have been scrapped and are available for indexing.
+- Updated the `routes.py`
+  - Added a new endpoint for batch scraping articles from a list of URLs. This endpoint will take a list of article URLs, call the `scrap_text_batch` method in the scrape service to scrape each article and save the contents. After scraping, it will call the `index_from_scraped` method in the indexing service to process and index the newly scrapped articles into the vector database. 
