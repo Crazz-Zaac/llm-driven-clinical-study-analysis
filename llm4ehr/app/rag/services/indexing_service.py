@@ -79,9 +79,9 @@ class IndexingService:
             "embedding_files": embedding_files,
         }
 
-    def index_from_scraped(self, article_ids: list[str]) -> dict[str, Any]:
-        """Load scraped articles from disk by article ID and index them."""
-        documents = self._load_scraped_documents(article_ids)
+    def index_from_fetched(self, article_ids: list[str]) -> dict[str, Any]:
+        """Load fetched articles from disk by article ID and index them."""
+        documents = self._load_fetched_documents(article_ids)
         return self.index_documents(documents)
 
     def _build_combined_text(self, doc: dict[str, Any]) -> str:
@@ -119,17 +119,17 @@ class IndexingService:
         file_id = hashlib.md5(article_id.encode()).hexdigest()
         return self.embeddings_dir / f"{file_id}.json"
 
-    def _load_scraped_documents(self, article_ids: list[str]) -> list[dict[str, Any]]:
-        scraped_dir = Path(settings.SCRAPED_ARTICLES_DIR)
-        if not scraped_dir.is_absolute():
-            scraped_dir = Path(__file__).resolve().parents[3] / scraped_dir
-        if not scraped_dir.exists():
+    def _load_fetched_documents(self, article_ids: list[str]) -> list[dict[str, Any]]:
+        fetched_dir = Path(settings.FETCHED_ARTICLES_DIR)
+        if not fetched_dir.is_absolute():
+            fetched_dir = Path(__file__).resolve().parents[3] / fetched_dir
+        if not fetched_dir.exists():
             return []
 
         documents: list[dict[str, Any]] = []
         for article_id in article_ids:
             matches = sorted(
-                scraped_dir.glob(f"{article_id}_*.json"),
+                fetched_dir.glob(f"{article_id}_*.json"),
                 key=lambda path: path.stat().st_mtime,
                 reverse=True,
             )

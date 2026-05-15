@@ -1,61 +1,57 @@
 import logging
 
-from app.schemas.scrape_schema import (
-    ScrapTextRequest,
-    ScrapTextResponse,
-    ScrapTextBatchRequest,
-    ScrapTextBatchResponse,
+from app.schemas.fetch_schema import (
+    FetchTextRequest,
+    FetchTextResponse,
+    FetchTextBatchRequest,
+    FetchTextBatchResponse,
     ArticleSchema,
     SectionSchema,
     MetadataSchema,
 )
-from app.scrapper.article_scrapper import ArticleScraper
-from datetime import datetime
+from app.fetcher.article_fetcher import ArticleFetcher
 from app.core.config import settings
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
 
-class ScrapTextService:
-    """Service for scraping text from documents."""
+class FetchTextService:
+    """Service for fetching text from documents."""
 
     def __init__(self):
-        self.scraper = ArticleScraper()
+        self.fetcher = ArticleFetcher()
 
-    def scrap_text(
-        self, request: ScrapTextRequest, save_to_disk: bool = False
-    ) -> ScrapTextResponse:
+    def fetch_text(
+        self, request: FetchTextRequest, save_to_disk: bool = False
+    ) -> FetchTextResponse:
         """
-        Scrape text from a single URL.
+        Fetch text from a single URL.
 
         Args:
-            request: ScrapTextRequest containing the URL to scrape
-            save_to_disk: If True, save the scraped article to app/data/ with unique filename
+            request: FetchTextRequest containing the URL to fetch
+            save_to_disk: If True, save the fetched article to app/data/ with unique filename
         Returns:
-            ScrapTextResponse with the scraped article data
+            FetchTextResponse with the fetched article data
         Raises:
-            ValueError: If scraping fails or article is not accessible
+            ValueError: If fetching fails or article is not accessible
         """
         try:
             url = str(request.url)
-            logger.info(f"Scraping article from: {url}")
+            logger.info(f"Fetching article from: {url}")
 
-            # Check if article is accessible
-            if not self.scraper.check_url_availability(url):
+            if not self.fetcher.check_url_availability(url):
                 raise ValueError(
                     f"Article URL is not accessible or returned error: {url}"
                 )
 
-            # Extract article ID from URL
-            article_id = self.scraper.extract_article_id(url)
+            article_id = self.fetcher.extract_article_id(url)
 
-            # Get cleaned HTML
-            html_content, article_title = self.scraper.extract_article_html(url)
+            html_content, article_title = self.fetcher.extract_article_html(url)
             if not html_content:
                 raise ValueError(f"Failed to extract HTML content from {url}")
 
-            # Extract sections
-            sections_dict = self.scraper.extract_sections(html_content)
+            sections_dict = self.fetcher.extract_sections(html_content)
             missing_sections = [
                 key for key, value in sections_dict.items() if not value
             ]
@@ -65,71 +61,70 @@ class ScrapTextService:
                 )
             sections = SectionSchema(**sections_dict)
 
-            # Create article response
             article = ArticleSchema(
                 article_id=article_id,
                 url=request.url,
                 source="nature",
-                scraped_at=datetime.now(),
+                fetched_at=datetime.now(),
                 sections=sections,
             )
 
-            # Save to disk if requested
             if save_to_disk:
                 article_data = {
                     "article_id": article_id,
                     "url": str(request.url),
                     "title": article_title,
                     "source": "nature",
-                    "scraped_at": datetime.now().isoformat(),
+                    "fetched_at": datetime.now().isoformat(),
                     **sections_dict,
                 }
-                self.scraper.save_article(article_data)
+                self.fetcher.save_article(article_data)
 
-            message = f"Article scraped successfully: {article_id}"
+            message = f"Article fetched successfully: {article_id}"
 
-            logger.info(f"Successfully scraped article: {article_id}")
-            return ScrapTextResponse(article=article, message=message)
+            logger.info(f"Successfully fetched article: {article_id}")
+            return FetchTextResponse(article=article, message=message)
 
         except Exception as e:
-            logger.error(f"Error scraping {request.url}: {str(e)}")
+            logger.error(f"Error fetching {request.url}: {str(e)}")
             raise
 
-    def scrap_text_batch(
-        self, request: ScrapTextBatchRequest, save_to_disk: bool = False
-    ) -> ScrapTextBatchResponse:
+    def fetch_text_batch(
+        self, request: FetchTextBatchRequest, save_to_disk: bool = False
+    ) -> FetchTextBatchResponse:
         """
-        Scrape text from multiple URLs.
+        Fetch text from multiple URLs.
 
         Args:
-            request: ScrapTextBatchRequest containing URLs to scrape
-            save_to_disk: If True, save scraped articles to data/scrapped_articles/
+            request: FetchTextBatchRequest containing URLs to fetch
+            save_to_disk: If True, save fetched articles to data/fetched_articles/
         Returns:
-            ScrapTextBatchResponse with the scraped article data
+            FetchTextBatchResponse with the fetched article data
         """
         articles: list[ArticleSchema] = []
         for url in request.urls:
             try:
-                response = self.scrap_text(
-                    ScrapTextRequest(url=url),
+                response = self.fetch_text(
+                    FetchTextRequest(url=url),
                     save_to_disk=save_to_disk,
                 )
                 articles.append(response.article)
             except Exception as e:
-                logger.warning(f"Skipping URL due to scrape error: {url} ({str(e)})")
+                logger.warning(f"Skipping URL due to fetch error: {url} ({str(e)})")
 
-        return ScrapTextBatchResponse(articles=articles)
+        return FetchTextBatchResponse(articles=articles)
 
-    def list_scraped_articles(self) -> list[dict[str, str | None]]:
-        """List all scraped articles from the data/scrapped_articles/ directory."""
+    def list_fetched_articles(self) -> list[dict[str, str | None]]:
+        """List all fetched articles from the data/fetched_articles/ directory."""
         from pathlib import Path
         import json
 
-        article_dir = Path(settings.SCRAPED_ARTICLES_DIR)
+        article_dir = Path(settings.FETCHED_ARTICLES_DIR)
         if not article_dir.is_absolute():
             article_dir = Path(__file__).resolve().parents[3] / article_dir
         if not article_dir.exists():
             return []
+
         articles: list[dict[str, str | None]] = []
         seen: set[str] = set()
         for file in article_dir.glob("*.json"):

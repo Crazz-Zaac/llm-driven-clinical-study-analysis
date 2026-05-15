@@ -26,7 +26,7 @@ services:
       - "com.example.service=qdrant"                                                                                                                                                                               
   # FastAPI Application
   backend:
-    image: backend:v1
+    image: llm4ehr-backend:v1
     build:
       context: ..
       dockerfile: docker/Dockerfile.backend
@@ -52,6 +52,9 @@ services:
       - llm4ehr-network
     labels:
       - "com.example.service=backend"
+    volumes:
+      - sqlite_data:/app/data
+    
   
   ollama:
     image: ollama/ollama:latest
@@ -74,7 +77,7 @@ services:
 
   # Next.js frontend
   frontend:
-    image: frontend:v1
+    image: llm4ehr-frontend:v1
     build:
       context: ..
       dockerfile: docker/Dockerfile.frontend
@@ -92,6 +95,10 @@ volumes:
   qdrant_storage:
     driver: local
   qdrant_snapshots:
+    driver: local
+  ollama_data:
+    driver: local
+  sqlite_data:
     driver: local
 
 networks:

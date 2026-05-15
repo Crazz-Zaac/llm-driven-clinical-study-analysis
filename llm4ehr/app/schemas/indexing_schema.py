@@ -16,10 +16,10 @@ class IndexRequest(BaseModel):
     documents: List[IndexDocument] = Field(..., description="Documents to index")
 
 
-class IndexFromScrapedRequest(BaseModel):
+class IndexFromFetchedRequest(BaseModel):
     article_ids: List[str] = Field(
         default_factory=list,
-        description="Article IDs to load from data/scrapped_articles",
+        description="Article IDs to load from data/fetched_articles",
     )
 
 
