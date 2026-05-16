@@ -6,6 +6,7 @@ from loguru import logger
 
 from app.rag.embeddings.embedder import TextEmbedder
 from app.db.qdrant_client import QdrantVectorDB
+from app.rag.chunking.splitter import TextChunker
 from app.core.config import settings
 
 
@@ -16,6 +17,7 @@ class IndexingService:
 
     def __init__(self):
         self.embedder = TextEmbedder()
+        self.chunker = TextChunker()
         self.vector_db = QdrantVectorDB()
         self.collection_name = settings.QDRANT_COLLECTION_NAME
 
@@ -28,42 +30,66 @@ class IndexingService:
         )
 
     def index_documents(self, documents: list[dict[str, Any]]) -> dict[str, Any]:
-        """Index a list of documents into the vector database and save embeddings to disk."""
         if self._stop_requested:
             return {"success": False, "indexed_count": 0, "embedding_files": []}
         if not documents:
             return {"success": True, "indexed_count": 0, "embedding_files": []}
 
-        combined_texts: list[str] = []
-        prepared_docs: list[dict[str, Any]] = []
-        for doc in documents:
-            combined_text = self._build_combined_text(doc)
-            prepared_doc = {**doc, "combined_text": combined_text}
-            prepared_docs.append(prepared_doc)
-            combined_texts.append(combined_text)
-
-        embeddings = self.embedder.embed(combined_texts, show_timing=False)
-
         points: list[dict[str, Any]] = []
         embedding_files: list[str] = []
-        for doc, embedding in zip(prepared_docs, embeddings):
-            if self._stop_requested:
-                break
-            file_path = self._save_embedding(doc, embedding)
+
+        for doc in documents:
+            # Save one embedding file per document (for record keeping)
+            combined_text = self._build_combined_text(doc)
+            doc_with_text = {**doc, "combined_text": combined_text}
+            abstract_chunks = self.chunker.split_text(doc.get("abstract", ""))
+            if abstract_chunks:
+                abstract_embedding = self.embedder.embed(
+                    [abstract_chunks[0].page_content], show_timing=False
+                )[0]
+                file_path = self._save_embedding(doc_with_text, abstract_embedding)
             embedding_files.append(str(file_path))
 
-            point = {
-                "id": self._make_point_id(doc["article_id"]),
-                "vector": embedding,
-                "payload": {
-                    "article_id": doc.get("article_id", ""),
-                    "url": doc.get("url", ""),
-                    "title": doc.get("title", ""),
-                    "abstract": doc.get("abstract", ""),
-                    "combined_text": doc.get("combined_text", ""),
-                },
-            }
-            points.append(point)
+            # Chunk and embed each section separately
+            for section_name in [
+                "abstract",
+                "methods",
+                "results",
+                "discussion",
+                "conclusion",
+            ]:
+                section_text = doc.get(section_name, "")
+                if not section_text:
+                    continue
+
+                chunks = self.chunker.split_text(section_text)
+                chunk_texts = [chunk.page_content for chunk in chunks]
+                if not chunk_texts:
+                    continue
+
+                embeddings = self.embedder.embed(chunk_texts, show_timing=False)
+
+                for i, (chunk_text, embedding) in enumerate(
+                    zip(chunk_texts, embeddings)
+                ):
+                    if self._stop_requested:
+                        break
+                    points.append(
+                        {
+                            "id": self._make_point_id(
+                                f"{doc['article_id']}_{section_name}_{i}"
+                            ),
+                            "vector": embedding,
+                            "payload": {
+                                "article_id": doc.get("article_id", ""),
+                                "url": doc.get("url", ""),
+                                "title": doc.get("title", ""),
+                                "section": section_name,
+                                "combined_text": chunk_text,
+                                "chunk_index": i,
+                            },
+                        }
+                    )
 
         if points:
             self.vector_db.upsert_vectors(self.collection_name, points)
@@ -78,22 +104,6 @@ class IndexingService:
         """Load fetched articles from disk by article ID and index them."""
         documents = self._load_fetched_documents(article_ids)
         return self.index_documents(documents)
-
-    def _build_combined_text(self, doc: dict[str, Any]) -> str:
-        return (
-            "Title: {title}\n\n"
-            "Abstract:\n{abstract}\n\n"
-            "Methods:\n{methods}\n\n"
-            "Results:\n{results}\n"
-            "Discussion:\n{discussion}\n\n"
-            "Conclusion:\n{conclusion}"
-        ).format(
-            title=doc.get("title", ""),
-            abstract=doc.get("abstract", ""),
-            methods=doc.get("methods", ""),
-            results=doc.get("results", ""),
-            conclusion=doc.get("conclusion", ""),
-        )
 
     def _save_embedding(self, doc: dict[str, Any], embedding: list[float]) -> Path:
         file_path = self._embedding_file_path(doc["article_id"])
@@ -170,6 +180,7 @@ class IndexingService:
 
 
 _indexing_service: IndexingService | None = None
+
 
 def get_indexing_service() -> IndexingService:
     global _indexing_service

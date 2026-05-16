@@ -348,6 +348,12 @@ pytest tests/test_rag_pipeline.py::TestRAGPipeline::test_pipeline_run_with_docum
   - After scraping, the article is processed and indexed into the vector database using the existing indexing methods
 - This workflow will be implemented in the `fetch_service.py` and a new endpoint will be added to the `routes.py` to allow users to trigger this
 
+---
+
+## 2026-05-16
+- Updated the `indexing_service.py`
+  - Initially, I was directly embedding combining the different sections of the paper per document without chunking them into smaller pieces. This was not ideal as it could lead to loss of important information and context in the embedding process, especially for longer papers. Now I have updated the `index_documents` to section-aware chunking. This means that each section of the paper (abstract, methods, results, conclusion) will be chunked separately and embedded separately. This way when the LLM gets context back, for example, it also knows "this is from the Methods section of paper X" which helps it reason better.
+
 
 TODO:
 - A way to ask a list of questions to all the papers and get the answers in a structured format

@@ -7,12 +7,10 @@ from typing import List
 
 from app.rag.services import (
     ChatService,
-    IngestionService,
     IndexingService,
     RetrievalService,
 )
 from app.rag.pipeline import RAGPipeline
-from app.schemas.ingestion_schema import IngestionRequest, IngestionResponse
 from app.schemas.chat_schema import ChatRequest, ChatResponse
 from app.schemas.query_schema import QueryRequest, QueryResponse
 from app.schemas.indexing_schema import (
@@ -28,7 +26,6 @@ from app.schemas.fetch_schema import (
     FetchTextListResponse,
 )
 from app.rag.services.fetch_service import FetchTextService
-from app.rag.embeddings.embedder import TextEmbedder
 from app.rag.services.indexing_service import get_indexing_service
 from app.research.paper_fetcher import PaperFetcher
 from app.schemas.paper_schema import PaperRequest, PaperResponse
@@ -38,40 +35,6 @@ from app.db.sqlite import get_db
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-# Ingestion Endpoints
-@router.post(
-    "/ingest", response_model=IngestionResponse, status_code=status.HTTP_200_OK
-)
-async def ingest_documents(request: IngestionRequest):
-    """
-    Ingest documents into the vector database.
-
-    - **documents**: List of document texts to ingest
-    - **doc_id**: Optional document ID for tracking
-    """
-    try:
-        logger.info(f"Ingesting {len(request.documents)} documents...")
-        ingestion_service = IngestionService()
-        response = ingestion_service.ingest_documents(request)
-
-        if response.success:
-            logger.info(
-                f"Successfully ingested {response.metadata.get('ingested_count', 0)} chunks"
-            )
-        else:
-            logger.error(
-                f"Ingestion failed: {response.metadata.get('error', 'Unknown error')}"
-            )
-
-        return response
-    except Exception as e:
-        logger.error(f"Error during ingestion: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Ingestion error: {str(e)}",
-        )
 
 
 # Indexing Endpoints
@@ -208,31 +171,6 @@ async def chat(request: ChatRequest):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Chat error: {str(e)}",
-        )
-
-
-# Embedding Endpoint - for embedding the uploaded documents without ingesting them into the vector database
-@router.post("/embed", status_code=status.HTTP_200_OK)
-async def embed_text(request: IngestionRequest):
-    """
-    Embed text using the embedding model.
-
-    - **documents**: List of document texts to embed
-
-    This endpoint is for testing and debugging the embedding process without ingesting into the vector database.
-    """
-    try:
-        logger.info(f"Embedding {len(request.documents)} documents...")
-        embedder = TextEmbedder()
-        embeddings = embedder.embed(request.documents)
-
-        logger.info("Text embedding completed successfully")
-        return {"embeddings": embeddings}
-    except Exception as e:
-        logger.error(f"Error during embedding: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Embedding error: {str(e)}",
         )
 
 
