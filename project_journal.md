@@ -336,3 +336,24 @@ pytest tests/test_rag_pipeline.py::TestRAGPipeline::test_pipeline_run_with_docum
   - Added `list_scraped_articles` method which lists all the scrapped articles available in the `data/` directory. This can be useful for keeping track of what articles have been scrapped and are available for indexing.
 - Updated the `routes.py`
   - Added a new endpoint for batch scraping articles from a list of URLs. This endpoint will take a list of article URLs, call the `scrap_text_batch` method in the scrape service to scrape each article and save the contents. After scraping, it will call the `index_from_scraped` method in the indexing service to process and index the newly scrapped articles into the vector database. 
+
+---
+
+## 2026-05-15
+- Renamed `scrape` to `fetch` in the service and the endpoint to better reflect the functionality of fetching articles from nature journal. Scraping is more of a general term for extracting data from websites, while fetching specifically refers to retrieving articles from a source like nature journal. This renaming will help clarify the purpose of the service and endpoint.
+- Initially it was only possible scrape articles one by one  or in a batch by providing a list of nature's article URLs. Now I have tend to implement a new workflow using `OpenAlex` API to search for articles based on keywords and then scrape and index the top results. This will allow for a more dynamic and flexible way to find relevant articles without needing to manually provide URLs. The workflow will be as follows:
+  - OpenAlex returns a list of articles based on the provided keywords
+  - For each article in the results, UNPPAYWALL API is used to check if the full text is available and to get the URL for scraping
+  - The article is then scraped using the existing scraping methods and the contents are saved to the `data/` directory
+  - After scraping, the article is processed and indexed into the vector database using the existing indexing methods
+- This workflow will be implemented in the `fetch_service.py` and a new endpoint will be added to the `routes.py` to allow users to trigger this
+
+
+TODO:
+- A way to ask a list of questions to all the papers and get the answers in a structured format
+- Prompt -> Answers from each paper
+- Scrap papers based on the keywords (a list of papers) -> 10 papers  
+- Prompt the queries( from the google sheet) -> Evaluate the answers
+- Add the info about the mimic-iv dataset in the context 
+- Add the info about ICD taxonomy in the context
+- Reproducibility of papers -> [target (do they include ), cohort definition(do they include the ICD codes, OPS code)]

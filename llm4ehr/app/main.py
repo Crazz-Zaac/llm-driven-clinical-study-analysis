@@ -1,6 +1,7 @@
 """
 FastAPI application entry point for LLM4EHR RAG system
 """
+
 from contextlib import asynccontextmanager
 import logging
 from pathlib import Path
@@ -13,19 +14,24 @@ if str(project_root) not in sys.path:
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.endpoints import routes
+from app.db.sqlite import init_db
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 
 # Lifespan context manager for startup and shutdown events
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     logger.info("LLM4EHR RAG API starting up...")
+    init_db()  # ← creates SQLite tables if they don't exist yet
+    logger.info("SQLite database initialized.")
     yield
     # Shutdown
     logger.info("LLM4EHR RAG API shutting down...")
+
 
 # Create FastAPI app with lifespan
 app = FastAPI(
@@ -34,7 +40,7 @@ app = FastAPI(
     version="0.1.0",
     docs_url="/docs",
     redoc_url="/redoc",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # Add CORS middleware
@@ -49,15 +55,13 @@ app.add_middleware(
 # Include routers
 app.include_router(routes.router, prefix="/api/v1", tags=["v1"])
 
+
 # Root endpoint
 @app.get("/")
 async def root():
     """Root endpoint"""
-    return {
-        "message": "LLM4EHR RAG API",
-        "version": "0.1.0",
-        "docs": "/docs"
-    }
+    return {"message": "LLM4EHR RAG API", "version": "0.1.0", "docs": "/docs"}
+
 
 # Health check endpoint
 @app.get("/health")
@@ -65,6 +69,8 @@ async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "service": "llm4ehr-api"}
 
+
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)

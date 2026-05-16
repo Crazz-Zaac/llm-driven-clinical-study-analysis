@@ -1,6 +1,10 @@
 from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 import logging
 from pathlib import Path
+from typing import List
+
 from app.rag.services import (
     ChatService,
     IngestionService,
@@ -14,17 +18,22 @@ from app.schemas.query_schema import QueryRequest, QueryResponse
 from app.schemas.indexing_schema import (
     IndexRequest,
     IndexResponse,
-    IndexFromScrapedRequest,
+    IndexFromFetchedRequest,
     DeleteIndexRequest,
     DeleteIndexResponse,
 )
-from app.schemas.scrape_schema import (
-    ScrapTextBatchRequest,
-    ScrapTextBatchResponse,
-    ScrapTextListResponse,
+from app.schemas.fetch_schema import (
+    FetchTextBatchRequest,
+    FetchTextBatchResponse,
+    FetchTextListResponse,
 )
-from app.rag.services.scrape_service import ScrapTextService
+from app.rag.services.fetch_service import FetchTextService
 from app.rag.embeddings.embedder import TextEmbedder
+from app.rag.services.indexing_service import get_indexing_service
+from app.research.paper_fetcher import PaperFetcher
+from app.schemas.paper_schema import PaperRequest, PaperResponse
+from app.db import crud
+from app.db.sqlite import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -89,24 +98,24 @@ async def index_documents(request: IndexRequest):
 
 
 @router.post(
-    "/index/from-scraped", response_model=IndexResponse, status_code=status.HTTP_200_OK
+    "/index/from-fetched", response_model=IndexResponse, status_code=status.HTTP_200_OK
 )
-async def index_from_scraped(request: IndexFromScrapedRequest):
+async def index_from_fetched(request: IndexFromFetchedRequest):
     """
-    Index documents by loading them from data/scrapped_articles.
+    Index documents by loading them from data/fetched_articles.
 
     - **article_ids**: List of article IDs to index
     """
     try:
-        logger.info(f"Indexing {len(request.article_ids)} scraped documents...")
-        indexing_service = IndexingService()
-        response = indexing_service.index_from_scraped(request.article_ids)
+        logger.info(f"Indexing {len(request.article_ids)} fetched documents...")
+        indexing_service = get_indexing_service()
+        response = indexing_service.index_from_fetched(request.article_ids)
         return response
     except Exception as e:
-        logger.error(f"Error during index-from-scraped: {str(e)}")
+        logger.error(f"Error during index-from-fetched: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Index-from-scraped error: {str(e)}",
+            detail=f"Index-from-fetched error: {str(e)}",
         )
 
 
@@ -114,7 +123,7 @@ async def index_from_scraped(request: IndexFromScrapedRequest):
 async def stop_indexing():
     """Stop indexing requests for the current process."""
     try:
-        indexing_service = IndexingService()
+        indexing_service = get_indexing_service()
         indexing_service.stop_indexing()
         return {"success": True, "message": "Indexing stop requested"}
     except Exception as e:
@@ -131,7 +140,7 @@ async def stop_indexing():
 async def delete_indexed_documents(request: DeleteIndexRequest):
     """Delete indexed documents or entire collection."""
     try:
-        indexing_service = IndexingService()
+        indexing_service = get_indexing_service()
 
         if request.delete_all or not request.article_ids:
             deleted_files = [
@@ -259,47 +268,136 @@ async def rag_chat(request: ChatRequest):
         )
 
 
+# Article Fetching Endpoints
 @router.post(
-    "/scrape/batch",
-    response_model=ScrapTextBatchResponse,
-    status_code=status.HTTP_200_OK,
+    "/fetch/from-openalex", response_model=PaperResponse, status_code=status.HTTP_200_OK
 )
-async def scrape_articles(request: ScrapTextBatchRequest, save: bool = True):
+async def run_fetcher(request: PaperRequest, db: Session = Depends(get_db)):
     """
-    Scrape text from multiple article URLs.
+    Run the paper fetcher to search for articles based on a query, fetch them, and save to disk.
 
-    - **urls**: List of URLs to scrape
-    - **save**: Optional. If true, save scraped articles to data/scrapped_articles/
+    - **query**: Search query to find relevant articles using OpenAlex API
+
+    The fetcher will:
+    1. Search for articles using OpenAlex API
+    2. For each article, check if it's already fetched, verify with Unpaywall, check URL availability, and then fetch and save if valid.
+    3. Return a summary of the fetching process.
     """
     try:
-        logger.info(f"Scraping {len(request.urls)} articles")
-        scrap_service = ScrapTextService()
-        response = scrap_service.scrap_text_batch(request, save_to_disk=save)
-
-        logger.info("Batch scraping completed successfully")
-        return response
+        logger.info(f"Running paper fetcher with query: {request.query}")
+        fetcher = PaperFetcher()
+        summary = fetcher.run(
+            keywords=request.query,
+            max_results=request.max_results,
+            db=db,
+        )
+        logger.info("Paper fetcher completed successfully")
+        return summary
     except Exception as e:
-        logger.error(f"Error during batch scraping: {str(e)}")
+        logger.error(f"Error running paper fetcher: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Batch scraping error: {str(e)}",
+            detail=f"Paper fetcher error: {str(e)}",
+        )
+
+
+@router.post("/fetch/reset-cursor", status_code=status.HTTP_200_OK)
+async def reset_cursor(query: List[str], db: Session = Depends(get_db)):
+    """
+    Reset the saved cursor for a given query in the paper fetcher. This will allow the fetcher to start fetching from the beginning of the results again.
+
+    - **query**: The query for which to reset the cursor
+    """
+    key = " AND ".join([k.strip() for k in query])
+    try:
+        crud.reset_cursor(db, key)
+        logger.info(f"Cursor reset successfully for query: {key}")
+        return {"success": True, "message": f"Cursor reset for query: {key}"}
+    except Exception as e:
+        logger.error(f"Error resetting cursor for query {key}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Reset cursor error: {str(e)}",
+        )
+
+
+@router.post(
+    "/fetch/batch",
+    response_model=FetchTextBatchResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def fetch_articles(request: FetchTextBatchRequest, save: bool = True):
+    """
+    Fetch text from multiple article URLs.
+
+    - **urls**: List of URLs to fetch
+    - **save**: Optional. If true, save fetched articles to data/fetched_articles/
+    """
+    try:
+        logger.info(f"Fetching {len(request.urls)} articles")
+        fetch_service = FetchTextService()
+        response = fetch_service.fetch_text_batch(request, save_to_disk=save)
+
+        logger.info("Batch fetching completed successfully")
+        return response
+    except Exception as e:
+        logger.error(f"Error during batch fetching: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Batch fetching error: {str(e)}",
         )
 
 
 @router.get(
-    "/scrape/list", response_model=ScrapTextListResponse, status_code=status.HTTP_200_OK
+    "/fetch/list", response_model=FetchTextListResponse, status_code=status.HTTP_200_OK
 )
-async def list_scraped_articles():
-    """List scraped articles saved on disk."""
+async def list_fetched_articles():
+    """List fetched articles saved on disk."""
     try:
-        scrap_service = ScrapTextService()
-        articles = scrap_service.list_scraped_articles()
+        fetch_service = FetchTextService()
+        articles = fetch_service.list_fetched_articles()
         return {"articles": articles}
     except Exception as e:
-        logger.error(f"Error listing scraped articles: {str(e)}")
+        logger.error(f"Error listing fetched articles: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"List scraped articles error: {str(e)}",
+            detail=f"List fetched articles error: {str(e)}",
+        )
+
+
+# Crawler Job Endpoints
+@router.get("/fetch/jobs")
+async def list_jobs(limit: int = 10, db: Session = Depends(get_db)):
+    """List recent fetch jobs and their statuses."""
+    try:
+        jobs = crud.get_recent_jobs(db, limit=limit)
+        return {"jobs": [job.model_dump() for job in jobs]}
+    except Exception as e:
+        logger.error(f"Error listing jobs: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"List jobs error: {str(e)}",
+        )
+
+
+@router.post("/jobs/{job_id}")
+async def get_job_status(job_id: str, db: Session = Depends(get_db)):
+    """Get the status and summary of a specific fetch job."""
+    try:
+        job = crud.get_job(db, job_id)
+        if not job:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Job not found: {job_id}",
+            )
+        return {"job": job.model_dump()}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting job status: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Get job status error: {str(e)}",
         )
 
 
@@ -313,12 +411,12 @@ async def get_info():
         "endpoints": {
             "ingest": "POST /api/v1/ingest - Ingest documents",
             "index": "POST /api/v1/index - Index provided documents",
-            "index_from_scraped": "POST /api/v1/index/from-scraped - Index saved scraped articles",
+            "index_from_fetched": "POST /api/v1/index/from-fetched - Index saved fetched articles",
             "retrieve": "POST /api/v1/retrieve - Retrieve documents",
             "chat": "POST /api/v1/chat - Chat with model",
             "rag": "POST /api/v1/rag - RAG pipeline (retrieve + chat)",
-            "scrape_batch": "POST /api/v1/scrape/batch - Scrape article text from URLs",
-            "scrape_list": "GET /api/v1/scrape/list - List scraped articles",
+            "fetch_batch": "POST /api/v1/fetch/batch - Fetch article text from URLs",
+            "fetch_list": "GET /api/v1/fetch/list - List fetched articles",
             "health": "GET /api/v1/health - Health check",
         },
     }

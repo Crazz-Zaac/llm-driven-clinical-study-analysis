@@ -7,14 +7,15 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 import requests
-from app.core.config import settings
 from bs4 import BeautifulSoup
 import trafilatura
+
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 
-class ArticleScraper:
+class ArticleFetcher:
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update(
@@ -70,7 +71,6 @@ class ArticleScraper:
             metadata = trafilatura.extract_metadata(response.text)
             title = metadata.title if metadata and metadata.title else "No Title"
 
-            # Use trafilatura to clean the HTML but keep structure
             cleaned_html = trafilatura.extract(
                 response.text,
                 output_format="html",
@@ -99,15 +99,14 @@ class ArticleScraper:
             "abstract": ["abstract", "summary"],
             "methods": ["method", "methods", "materials and methods", "methodology"],
             "results": ["results", "findings"],
-            "conclusion": ["conclusion", "discussion", "discussions", "conclusions"],
+            "discussion": ["discussion", "discussions"],
+            "conclusion": ["conclusion", "conclusions"],
         }
         sections = {key: [] for key in section_patterns}
         current_section = None
 
-        #  iterate through document elements in order
         for elem in soup.find_all(["h1", "h2", "h3", "p", "ul", "ol", "table"]):
 
-            # ---- Detect new main section ----
             if elem.name in ["h1", "h2"]:
                 heading_text = elem.get_text(" ", strip=True).lower()
                 for section, patterns in section_patterns.items():
@@ -120,9 +119,7 @@ class ArticleScraper:
                 else:
                     current_section = None
 
-            # ---- Collect content if inside section ----
             elif current_section:
-
                 if elem.name == "p":
                     text = elem.get_text(strip=True)
                     if text:
@@ -146,7 +143,6 @@ class ArticleScraper:
                     if rows:
                         sections[current_section].append("\n".join(rows))
 
-        # fallback abstract detection
         if not sections["abstract"]:
             abstract_elem = soup.find("div", {"class": re.compile("abstract", re.I)})
             if abstract_elem:
@@ -161,20 +157,16 @@ class ArticleScraper:
 
     def save_article(self, output_data: dict):
         """Save article sections to a JSON file with unique name"""
-        # Create data directory inside app (same level as scrapper/)
-        output_dir = Path(settings.SCRAPED_ARTICLES_DIR)
-        if not output_dir.is_absolute():
-            output_dir = Path(__file__).resolve().parents[1] / output_dir
-        output_dir.mkdir(parents=True, exist_ok=True)
+        output_dir = Path(settings.FETCHED_ARTICLES_DIR)
+        output_dir.mkdir(parents=True, exist_ok=True)  # no more parents[1] hack
 
-        # Generate unique filename: article_id_timestamp_uuid.json
         article_id = output_data.get("article_id", "unknown")
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         unique_id = str(uuid.uuid4())[:8]
         filename = f"{article_id}_{timestamp}_{unique_id}.json"
 
         output_path = output_dir / filename
-
+        logger.info(f"Saving to resolved path: {output_dir.resolve()}")
         try:
             with open(output_path, "w", encoding="utf-8") as f:
                 json.dump(output_data, f, ensure_ascii=False, indent=2)
@@ -183,47 +175,29 @@ class ArticleScraper:
             logger.error(f"Failed to save article to {output_path}: {str(e)}")
             raise
 
+
     def process_article(self, url: str):
-
-        # Extract article ID
         article_id = self.extract_article_id(url)
-
-        # Get cleaned HTML
         html_content, article_title = self.extract_article_html(url)
+
         if not html_content:
             print(f"Failed to extract HTML from {url}")
             return
 
-        # Extract sections
         sections = self.extract_sections(html_content)
 
-        scrapped_contents = {}
-        # Check if all the sections have content
-        if all(sections.values()):
-            print(f"Saving contents for article ID: {article_id}")
-            scrapped_contents = {
+        fetched_contents = {}
+ 
+        non_empty = {k: v for k, v in sections.items() if v}
+        if non_empty:
+            logger.info(f"Saving contents for article ID: {article_id}")
+            fetched_contents = {
                 "article_id": article_id,
                 "url": url,
                 "title": article_title,
-                **sections,
+                **sections,  # empty sections will just be empty strings
             }
         else:
-            print(
-                f"Found missing [{', '.join([k for k, v in sections.items() if not v])} for article ID: {article_id}], skipping save."
-            )
+            logger.info(f"No content extracted for {article_id}, skipping.")
             return None
-        return scrapped_contents
-
-
-# if __name__ == "__main__":
-#     scraper = ArticleScraper()
-#     test_urls = [
-# "https://www.nature.com/articles/s41409-025-02761-5",
-# "https://www.nature.com/articles/s41409-025-02762-4",
-# "https://www.nature.com/articles/s41598-026-42395-1",
-# "https://www.nature.com/articles/s41409-025-02763-3",
-#     ]
-#     for url in test_urls:
-#         article_data = scraper.process_article(url)
-#         if article_data:
-#             scraper.save_article(article_data)
+        return fetched_contents

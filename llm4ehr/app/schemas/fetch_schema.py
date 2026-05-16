@@ -1,5 +1,5 @@
 from pydantic import BaseModel, HttpUrl
-from typing import Optional, List, Dict
+from typing import Optional, List
 from datetime import datetime
 
 
@@ -21,38 +21,38 @@ class ArticleSchema(BaseModel):
     article_id: str
     url: HttpUrl
     source: str = "nature"
-    scraped_at: datetime
+    fetched_at: datetime
     sections: SectionSchema
     metadata: Optional[MetadataSchema] = None
 
 
-class ScrapTextRequest(BaseModel):
+class FetchTextRequest(BaseModel):
     url: HttpUrl
 
 
-class ScrapTextBatchRequest(BaseModel):
+class FetchTextBatchRequest(BaseModel):
     urls: List[HttpUrl]
 
 
-class ScrapTextResponse(BaseModel):
+class FetchTextResponse(BaseModel):
     article: ArticleSchema
-    message: Optional[str] = "Article scraped successfully"
+    message: Optional[str] = "Article fetched successfully"
 
 
-class ScrapTextBatchResponse(BaseModel):
+class FetchTextBatchResponse(BaseModel):
     articles: List[ArticleSchema]
-    message: Optional[str] = "Articles scraped successfully"
+    message: Optional[str] = "Articles fetched successfully"
 
 
-class ScrapTextListItem(BaseModel):
+class FetchTextListItem(BaseModel):
     article_id: str
     title: Optional[str] = None
     url: HttpUrl
 
 
-class ScrapTextListResponse(BaseModel):
-    articles: List[ScrapTextListItem]
+class FetchTextListResponse(BaseModel):
+    articles: List[FetchTextListItem]
 
 
-class ScrapTextErrorResponse(BaseModel):
+class FetchTextErrorResponse(BaseModel):
     error: str
