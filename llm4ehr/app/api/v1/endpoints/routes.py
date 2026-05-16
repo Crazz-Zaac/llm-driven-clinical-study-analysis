@@ -29,6 +29,7 @@ from app.schemas.fetch_schema import (
 )
 from app.rag.services.fetch_service import FetchTextService
 from app.rag.embeddings.embedder import TextEmbedder
+from app.rag.services.indexing_service import get_indexing_service
 from app.research.paper_fetcher import PaperFetcher
 from app.schemas.paper_schema import PaperRequest, PaperResponse
 from app.db import crud
@@ -107,7 +108,7 @@ async def index_from_fetched(request: IndexFromFetchedRequest):
     """
     try:
         logger.info(f"Indexing {len(request.article_ids)} fetched documents...")
-        indexing_service = IndexingService()
+        indexing_service = get_indexing_service()
         response = indexing_service.index_from_fetched(request.article_ids)
         return response
     except Exception as e:
@@ -122,7 +123,7 @@ async def index_from_fetched(request: IndexFromFetchedRequest):
 async def stop_indexing():
     """Stop indexing requests for the current process."""
     try:
-        indexing_service = IndexingService()
+        indexing_service = get_indexing_service()
         indexing_service.stop_indexing()
         return {"success": True, "message": "Indexing stop requested"}
     except Exception as e:
@@ -139,7 +140,7 @@ async def stop_indexing():
 async def delete_indexed_documents(request: DeleteIndexRequest):
     """Delete indexed documents or entire collection."""
     try:
-        indexing_service = IndexingService()
+        indexing_service = get_indexing_service()
 
         if request.delete_all or not request.article_ids:
             deleted_files = [

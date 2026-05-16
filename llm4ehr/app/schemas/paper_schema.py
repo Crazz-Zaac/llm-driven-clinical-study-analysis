@@ -25,15 +25,13 @@ class PaperRequest(BaseModel):
  
 class PaperResponse(BaseModel):
     job_id: str
-    keywords: List[str]
+    keywords: list[str]
     cursor_used: str
     next_cursor: str | None
     total_available: int
     total_found: int
     already_fetched: int
-    paywall_blocked: int
     unavailable: int
-    non_nature: int
     newly_fetched: int
-    fetched_papers: list
-    skipped_papers: list
+    fetched_papers: list[dict]
+    skipped_papers: list[dict]

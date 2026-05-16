@@ -2,6 +2,7 @@ import hashlib
 import json
 from pathlib import Path
 from typing import Any
+from loguru import logger
 
 from app.rag.embeddings.embedder import TextEmbedder
 from app.db.qdrant_client import QdrantVectorDB
@@ -13,18 +14,12 @@ class IndexingService:
 
     _stop_requested = False
 
-    def __init__(self, embeddings_dir: Path | None = None):
+    def __init__(self):
         self.embedder = TextEmbedder()
         self.vector_db = QdrantVectorDB()
         self.collection_name = settings.QDRANT_COLLECTION_NAME
 
-        base_dir = Path(__file__).resolve().parents[3]
-        configured_dir = Path(embeddings_dir or settings.EMBEDDINGS_DIR)
-        self.embeddings_dir = (
-            configured_dir
-            if configured_dir.is_absolute()
-            else base_dir / configured_dir
-        )
+        self.embeddings_dir = Path(settings.EMBEDDINGS_DIR)
         self.embeddings_dir.mkdir(parents=True, exist_ok=True)
 
         self.vector_db.create_collection(
@@ -90,6 +85,7 @@ class IndexingService:
             "Abstract:\n{abstract}\n\n"
             "Methods:\n{methods}\n\n"
             "Results:\n{results}\n"
+            "Discussion:\n{discussion}\n\n"
             "Conclusion:\n{conclusion}"
         ).format(
             title=doc.get("title", ""),
@@ -108,6 +104,7 @@ class IndexingService:
             "abstract": doc.get("abstract", ""),
             "methods": doc.get("methods", ""),
             "results": doc.get("results", ""),
+            "discussion": doc.get("discussion", ""),
             "conclusion": doc.get("conclusion", ""),
             "combined_text": doc.get("combined_text", ""),
             "embedding": embedding,
@@ -121,8 +118,8 @@ class IndexingService:
 
     def _load_fetched_documents(self, article_ids: list[str]) -> list[dict[str, Any]]:
         fetched_dir = Path(settings.FETCHED_ARTICLES_DIR)
-        if not fetched_dir.is_absolute():
-            fetched_dir = Path(__file__).resolve().parents[3] / fetched_dir
+        logger.info(f"Looking for articles in: {fetched_dir}")
+        logger.info(f"Article IDs requested: {article_ids}")
         if not fetched_dir.exists():
             return []
 
@@ -170,3 +167,12 @@ class IndexingService:
     def delete_collection(self):
         """Delete the entire collection from the vector database."""
         self.vector_db.delete_collection(self.collection_name)
+
+
+_indexing_service: IndexingService | None = None
+
+def get_indexing_service() -> IndexingService:
+    global _indexing_service
+    if _indexing_service is None:
+        _indexing_service = IndexingService()
+    return _indexing_service

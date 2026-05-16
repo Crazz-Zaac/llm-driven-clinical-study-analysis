@@ -15,9 +15,10 @@ class Config:
     QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "")
     QDRANT_COLLECTION_NAME = os.getenv("QDRANT_COLLECTION_NAME", "ehr_documents")
 
-    EMBEDDINGS_DIR = os.getenv("EMBEDDINGS_DIR", "app/data/embeddings")
+    BASEDIR = "app/"
+    EMBEDDINGS_DIR = os.getenv("EMBEDDINGS_DIR", BASEDIR + "/data/embeddings")
     FETCHED_ARTICLES_DIR = os.getenv(
-        "FETCHED_ARTICLES_DIR", "app/data/fetched_articles"
+        "FETCHED_ARTICLES_DIR", BASEDIR + "/data/fetched_articles"
     )
 
     # LLM settings
