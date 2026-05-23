@@ -13,8 +13,16 @@ if str(project_root) not in sys.path:
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.v1.endpoints import routes
 from app.db.sqlite import init_db
+
+from app.api.v1.endpoints import (
+    chat_routes,
+    fetch_routes,
+    indexing_routes,
+    jobs_routes,
+    ollama_model_routes,
+    retrieval_routes
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -53,7 +61,12 @@ app.add_middleware(
 )
 
 # Include routers
-app.include_router(routes.router, prefix="/api/v1", tags=["v1"])
+app.include_router(indexing_routes.router, prefix="/api/v1")
+app.include_router(retrieval_routes.router, prefix="/api/v1")
+app.include_router(chat_routes.router, prefix="/api/v1")
+app.include_router(fetch_routes.router, prefix="/api/v1")
+app.include_router(jobs_routes.router, prefix="/api/v1")
+app.include_router(ollama_model_routes.router, prefix="/api/v1")
 
 
 # Root endpoint

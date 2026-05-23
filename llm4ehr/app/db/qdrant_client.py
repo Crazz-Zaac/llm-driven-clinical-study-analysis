@@ -38,6 +38,11 @@ class QdrantVectorDB:
         # returning the points with payload for further processing in the retrieval service
         return response.points
 
+    def ensure_collection(self, collection_name: str, vector_size: int):
+        """Ensure the collection exists before performing operations"""
+        if not self.client.collection_exists(collection_name):
+            self.create_collection(collection_name, vector_size)    
+
     def delete_collection(self, collection_name: str):
         """Delete an entire collection from Qdrant"""
         if self.client.collection_exists(collection_name):

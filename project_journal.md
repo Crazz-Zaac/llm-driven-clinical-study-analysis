@@ -348,6 +348,37 @@ pytest tests/test_rag_pipeline.py::TestRAGPipeline::test_pipeline_run_with_docum
   - After scraping, the article is processed and indexed into the vector database using the existing indexing methods
 - This workflow will be implemented in the `fetch_service.py` and a new endpoint will be added to the `routes.py` to allow users to trigger this
 
+---
+
+## 2026-05-16
+- Updated the `indexing_service.py`
+  - Initially, I was directly embedding combining the different sections of the paper per document without chunking them into smaller pieces. This was not ideal as it could lead to loss of important information and context in the embedding process, especially for longer papers. Now I have updated the `index_documents` to section-aware chunking. This means that each section of the paper (abstract, methods, results, conclusion) will be chunked separately and embedded separately. This way when the LLM gets context back, for example, it also knows "this is from the Methods section of paper X" which helps it reason better.
+
+---
+## 2026-05-23
+
+- **Embedding models:**
+nomic-embed-text:latest(~274 MB), mxbai-embed-large:latest (~670 MB), qwen3-embedding:0.6b (~600 MB), qwen2.5-embedding:0.6b (~600 MB), gemma3-embedding:0.6b (~600 MB), phi4-embedding:0.6b (~600 MB)
+
+- **Chat models:**
+llama3.2:3b, qwen2.5:3b (1.9GB), gemma3:1b(1.2GB), qwen3:3b (2.1GB), phi4-mini:3.8b(2.3GB), phi4:7.1b (5.1GB)
+
+- Separated all the routes into different files based on their functionality. 
+- Updated the indexing service
+  - The delete collection method deleted the collection but never recreated it. Now after deleting the collection, it is immediately recreated to ensure that the collection is always available for indexing new documents. This also helps in avoiding issues where the collection might not exist when trying to index new documents after deletion.
+- Added ollama schema and service to manage the embedding and chat models
+  - Ollama schema: 
+    - `PullModelRequest`: pulls the requested model name but requires the model type to be specified (embedding, chat, vision)
+    - `PullModelResponse`: returns a success message after pulling the model
+    - ActivateModelRequest: activates the requested model name and type
+    - ActivateModelResponse: returns a success message after activating the model
+  - Ollama service:
+    - `pull_model`: takes the model name and type, calls the ollama API to pull the model and returns a success message
+    - `get_embedding_dimension`: takes the model name, calls the ollama API to get the model details and returns the embedding dimension for embedding models. This is important for ensuring that the vector database is configured with the correct dimension for the embeddings being used.
+    - `get_model_size_by_bytes`: takes the model name, calls the ollama API to get the model details and returns the size of the model in bytes. This is to restrict the user from pulling models that are larger than the specified `MAX_MODEL_SIZE` in the configuration. If the model size exceeds the limit, a ValueError is raised to inform the user.
+- Added `active_models.py`
+  - This is a sqlite table to keep track of the active embedding and chat models. It has four fields: `model_name`, `model_type`, `embedding_dimension` and `activated`. This allows us to easily manage and retrieve the currently active models for both embedding and chat functionalities. When a model is activated through the API, it updates this table to reflect the active model and its details. This way, when the embedding service or chat service needs to use the active model, it can query this table to get the necessary information about which model is currently active and its embedding dimension if it's an embedding model.
+- Created new endpoints for all of the above functionalities
 
 TODO:
 - A way to ask a list of questions to all the papers and get the answers in a structured format
