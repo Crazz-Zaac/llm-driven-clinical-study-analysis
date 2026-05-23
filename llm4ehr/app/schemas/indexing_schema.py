@@ -26,9 +26,9 @@ class IndexFromFetchedRequest(BaseModel):
 class IndexResponse(BaseModel):
     success: bool = Field(..., description="Whether indexing succeeded")
     indexed_count: int = Field(..., description="Number of documents indexed")
-    embedding_files: List[str] = Field(
-        ..., description="Paths to saved embedding files"
-    )
+    # embedding_files: List[str] = Field(
+    #     ..., description="Paths to saved embedding files"
+    # )
 
 
 class DeleteIndexRequest(BaseModel):
