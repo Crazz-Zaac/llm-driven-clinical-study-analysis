@@ -2,7 +2,7 @@
 import pytest
 from unittest.mock import Mock, MagicMock, patch
 from app.rag.services import RetrievalService
-from app.schemas.query_schema import QueryRequest
+from app.schemas.retrieval_schema import QueryRequest
 
 
 class TestRetrievalService:

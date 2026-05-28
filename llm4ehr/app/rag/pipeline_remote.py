@@ -3,7 +3,7 @@ from app.rag.services import RetrievalService
 from app.rag.llm.remote_chat_model import ChatModel
 from app.rag.prompts.system_prompt import SYSTEM_PROMPT
 from app.schemas.chat_schema import ChatMessage, ChatRequest, ChatResponse
-from app.schemas.query_schema import QueryRequest
+from app.schemas.retrieval_schema import QueryRequest
 
 
 class RAGPipelineRemote(RAGPipeline):  # inherit everything, just swap the model

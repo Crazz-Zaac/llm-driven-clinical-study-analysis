@@ -3,7 +3,7 @@ from fastapi import APIRouter
 import logging
 
 from app.rag.services import RetrievalService
-from app.schemas.query_schema import QueryRequest, QueryResponse
+from app.schemas.retrieval_schema import QueryRequest, QueryResponse
 
 logger = logging.getLogger(__name__)
 

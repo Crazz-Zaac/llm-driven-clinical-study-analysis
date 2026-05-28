@@ -355,6 +355,7 @@ pytest tests/test_rag_pipeline.py::TestRAGPipeline::test_pipeline_run_with_docum
   - Initially, I was directly embedding combining the different sections of the paper per document without chunking them into smaller pieces. This was not ideal as it could lead to loss of important information and context in the embedding process, especially for longer papers. Now I have updated the `index_documents` to section-aware chunking. This means that each section of the paper (abstract, methods, results, conclusion) will be chunked separately and embedded separately. This way when the LLM gets context back, for example, it also knows "this is from the Methods section of paper X" which helps it reason better.
 
 ---
+
 ## 2026-05-23
 
 - **Embedding models:**
@@ -409,6 +410,8 @@ llama3.2:3b, qwen2.5:3b (1.9GB), gemma3:1b(1.2GB), qwen3:3b (2.1GB), phi4-mini:3
 
 - Updated `system_prompt.py`
   - Updated the system prompt to include instructions for the LLM to use the section information of the retrieved documents when generating responses. T
+
+- The model response was including multiple duplicate articles in the source documents which is indeed correct because the same article can have multiple chunks that are relevant to the query as I'm chunking all the sections of the paper separately. However, to avoid confusion for the user, I now created a `source_document_schema.py` that includes only relevant information (article_id, url, title and score) for the user. For LLM's context we use `llm_docs` with all the information and metadata of the retrieved chunks.
 
 
 TODO:

@@ -2,7 +2,7 @@ from app.rag.services import RetrievalService
 from app.rag.llm.ollama_chat_model import OllamaChatModel
 from app.rag.prompts.system_prompt import SYSTEM_PROMPT
 from app.schemas.chat_schema import ChatMessage, ChatRequest, ChatResponse
-from app.schemas.query_schema import QueryRequest
+from app.schemas.retrieval_schema import QueryRequest
 
 
 class RAGPipeline:
@@ -28,7 +28,10 @@ class RAGPipeline:
             QueryRequest(query=last_user_message)
         )
 
-        docs = query_response.source_documents or []
+        # the documents retrieved from the vector database are in the llm_docs field of the response schema
+        # and will be used as the context for the LLM to generate a response.
+        # The source_documents field is what will be returned to the frontend
+        docs = query_response.llm_docs or []
         if not docs:
             return ChatResponse(
                 response="Not found in retrieved documents. Please ensure the article is indexed.",
@@ -72,8 +75,5 @@ class RAGPipeline:
 
         return ChatResponse(
             response=response.response,
-            source_documents=[
-                doc.model_dump(exclude=["abstract"])
-                for doc in (query_response.source_documents or [])
-            ],
+            source_documents=query_response.source_documents,
         )
