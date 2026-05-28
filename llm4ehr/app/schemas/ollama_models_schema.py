@@ -11,6 +11,7 @@ class ActivateModelRequest(BaseModel):
     model_name: str
     model_type: Literal["embedding", "chat"]
 
+
 class ActivateModelResponse(BaseModel):
     success: bool
     model_name: str
@@ -23,3 +24,9 @@ class PullModelResponse(BaseModel):
     model_name: str
     model_type: str
     message: str
+
+
+class ActiveModelsResponse(BaseModel):
+    chat_model: str | None
+    embedding_model: str | None
+    embedding_dimension: int | None

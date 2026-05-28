@@ -380,6 +380,37 @@ llama3.2:3b, qwen2.5:3b (1.9GB), gemma3:1b(1.2GB), qwen3:3b (2.1GB), phi4-mini:3
   - This is a sqlite table to keep track of the active embedding and chat models. It has four fields: `model_name`, `model_type`, `embedding_dimension` and `activated`. This allows us to easily manage and retrieve the currently active models for both embedding and chat functionalities. When a model is activated through the API, it updates this table to reflect the active model and its details. This way, when the embedding service or chat service needs to use the active model, it can query this table to get the necessary information about which model is currently active and its embedding dimension if it's an embedding model.
 - Created new endpoints for all of the above functionalities
 
+---
+
+## 2026-05-28
+- Create `ollama_chat_model.py` to chat with the locally currently active chat model
+  
+- Separated remote model into `remote_chat_model.py` which will call the Hugging Face API to generate responses using the remote models
+  
+- Updated `indexing_routes.py` to include `/index-all` endpoint which now indexes all documents present in the `data/fetched_articles` directory.
+  - Renamed the endpoints for indexing to be more intuitive and clear.
+  
+- Separated chat models as remote and local
+  - `remote_chat_model.py` currently calls Hugging Face API to generate responses. 
+  - `ollama_chat_model.py` will call the currently active chat model in the ollama service to generate responses. 
+
+- Updated `chat_routes.py`
+  - Changed `/chat/remote` endpoint and changed it to `/rag/remote`
+- Updated `query_schema.py`
+  - Updated `RetrievedDocument` schema to include `combined_text` and `section` which will be used to provide more context to the LLM when generating responses. The `combined_text` will contain the combined text of the chunk along with its metadata (like title, section, etc.) which can help the LLM understand the context better and generate more accurate responses.
+
+- Updated `pipeline.py`
+  - Initially I was including the retrieved documents in both system prompt and user prompt which was redundant. Now I have updated it to only include the retrieved documents in the system prompt.
+  
+- Separated the RAG pipeline into `pipeline.py` for using local models and `pipeline_remote.py` (which inherits pipeline base class but initializes to use the `remote_chat_model`) for using remote models. 
+
+- Updated `qdrant_client.py` 
+  - There was an issue with collection creation. I was calling the `create_collection` method in the initialization of the client which was then calling the `recreate_collection` method which was deleting the collection immediately after creating it. 
+
+- Updated `system_prompt.py`
+  - Updated the system prompt to include instructions for the LLM to use the section information of the retrieved documents when generating responses. T
+
+
 TODO:
 - A way to ask a list of questions to all the papers and get the answers in a structured format
 - Prompt -> Answers from each paper

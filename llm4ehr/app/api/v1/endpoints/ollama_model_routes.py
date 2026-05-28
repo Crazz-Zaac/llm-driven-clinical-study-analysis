@@ -6,11 +6,15 @@ from app.schemas.ollama_models_schema import (
     PullModelResponse,
     ActivateModelRequest,
     ActivateModelResponse,
+    ActiveModelsResponse,
 )
 from app.rag.services.ollama_service import OllamaService
 from app.db.activate_model import (
     set_active_embedding_model,
     set_active_chat_model,
+    get_active_chat_model,
+    get_active_embedding_model,
+    get_active_embedding_dimension,
 )
 
 logger = logging.getLogger(__name__)
@@ -18,7 +22,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/model", tags=["Model Management"])
 
 
-@router.post("/pull", response_model=PullModelResponse, tags=["Models"])
+@router.post("/pull", response_model=PullModelResponse)
 async def pull_model(request: PullModelRequest):
 
     try:
@@ -35,7 +39,7 @@ async def pull_model(request: PullModelRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/activate", response_model=ActivateModelResponse, tags=["Models"])
+@router.post("/activate", response_model=ActivateModelResponse)
 async def activate_model(request: ActivateModelRequest):
     try:
         available = OllamaService.list_models()
@@ -68,7 +72,7 @@ async def activate_model(request: ActivateModelRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/list", tags=["Models"])
+@router.get("/list")
 async def list_models():
 
     try:
@@ -78,7 +82,36 @@ async def list_models():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/delete", tags=["Models"])
+@router.get("/active-models", response_model=ActiveModelsResponse)
+async def get_active_models():
+
+    try:
+        try:
+            chat_model = get_active_chat_model()
+        except Exception:
+            chat_model = None
+
+        try:
+            embedding_model = get_active_embedding_model()
+        except Exception:
+            embedding_model = None
+
+        try:
+            embedding_dimension = get_active_embedding_dimension()
+        except Exception:
+            embedding_dimension = None
+
+        return ActiveModelsResponse(
+            chat_model=chat_model,
+            embedding_model=embedding_model,
+            embedding_dimension=embedding_dimension,
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/delete")
 async def delete_model(model_name: str):
 
     try:

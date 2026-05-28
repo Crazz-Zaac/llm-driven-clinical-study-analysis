@@ -44,16 +44,21 @@ class RetrievalService:
             source_docs = []
             for result in search_results:
                 payload = result.payload or {}
+                # in RetrievalService.retrieve()
                 source_docs.append(
                     RetrievedDocument(
                         article_id=payload.get("article_id", ""),
                         title=payload.get("title", ""),
                         url=payload.get("url", ""),
                         abstract=payload.get("abstract", ""),
+                        combined_text=payload.get("combined_text", ""),  
+                        section=payload.get("section", ""), 
                         score=result.score,
                     )
                 )
-            source_docs.sort(key=lambda x: x.score, reverse=True)  # Sort by relevance score
+            source_docs.sort(
+                key=lambda x: x.score, reverse=True
+            )  # Sort by relevance score
             top_docs = source_docs[:top_k]  # Keep only top_k documents
 
             logger.info(f"Retrieved {len(source_docs)} documents")

@@ -1,4 +1,4 @@
-from app.rag.llm.chat_model import ChatModel
+from app.rag.llm.remote_chat_model import ChatModel
 from app.schemas.chat_schema import ChatMessage, ChatRequest
 from app.rag.prompts.system_prompt import SYSTEM_PROMPT
 

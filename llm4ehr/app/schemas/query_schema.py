@@ -8,6 +8,8 @@ class RetrievedDocument(BaseModel):
     title: str
     url: str
     abstract: str
+    combined_text: str = "" 
+    section: str = ""
     score: float
 
 
