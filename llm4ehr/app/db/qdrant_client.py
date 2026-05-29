@@ -14,9 +14,9 @@ class QdrantVectorDB:
         )
 
     def create_collection(self, collection_name: str, vector_size: int):
-        """Create a new collection in Qdrant if it doesn't exist"""
+        """Create a new collection in Qdrant if it doesn't exist."""
         if not self.client.collection_exists(collection_name):
-            self.client.recreate_collection(
+            self.client.create_collection(
                 collection_name=collection_name,
                 vectors_config=rest.VectorParams(
                     size=vector_size, distance=rest.Distance.COSINE
@@ -39,9 +39,8 @@ class QdrantVectorDB:
         return response.points
 
     def ensure_collection(self, collection_name: str, vector_size: int):
-        """Ensure the collection exists before performing operations"""
-        if not self.client.collection_exists(collection_name):
-            self.create_collection(collection_name, vector_size)    
+        """Alias for create_collection — creates only if it doesn't exist."""
+        self.create_collection(collection_name, vector_size)
 
     def delete_collection(self, collection_name: str):
         """Delete an entire collection from Qdrant"""

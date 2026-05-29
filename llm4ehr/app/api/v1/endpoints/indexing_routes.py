@@ -15,12 +15,31 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/index", tags=["Indexing"])
 
 
+@router.post("/all", response_model=IndexResponse, status_code=status.HTTP_200_OK)
+async def index_all_fetched():
+    """
+    Index all documents found in the fetched articles directory.
+    """
+    try:
+        logger.info("Indexing all fetched documents...")
+        indexing_service = get_indexing_service()
+        response = indexing_service.index_from_fetched(article_ids=[])
+        return response
+    except Exception as e:
+        logger.error(f"Error during index-all: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Index-all error: {str(e)}",
+        )
+
+
 @router.post(
-    "/from-fetched", response_model=IndexResponse, status_code=status.HTTP_200_OK
+    "/articles", response_model=IndexResponse, status_code=status.HTTP_200_OK
 )
 async def index_from_fetched(request: IndexFromFetchedRequest):
     """
-    Index documents by loading them from data/fetched_articles.
+    Index selected fetched documents. Pass a list of article IDs to index specific documents 
+    from the fetched articles directory.
 
     - **article_ids**: List of article IDs to index
     """

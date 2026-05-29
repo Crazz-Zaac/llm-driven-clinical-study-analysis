@@ -1,14 +1,15 @@
 from app.rag.services import RetrievalService
-from app.rag.llm.chat_model import ChatModel
+from app.rag.llm.ollama_chat_model import OllamaChatModel
 from app.rag.prompts.system_prompt import SYSTEM_PROMPT
 from app.schemas.chat_schema import ChatMessage, ChatRequest, ChatResponse
-from app.schemas.query_schema import QueryRequest
+from app.schemas.retrieval_schema import QueryRequest
 
 
 class RAGPipeline:
     def __init__(self):
         self.retrieval_service = RetrievalService()
-        self.chat_model = ChatModel()
+        # this is the local model used for generating responses in the RAG pipeline, it can be swapped out if needed
+        self.chat_model = OllamaChatModel()
 
     def run(self, request: ChatRequest) -> ChatResponse:
         user_messages = [msg for msg in request.messages if msg.role == "user"]
@@ -27,14 +28,22 @@ class RAGPipeline:
             QueryRequest(query=last_user_message)
         )
 
-        docs = query_response.source_documents or []
+        # the documents retrieved from the vector database are in the llm_docs field of the response schema
+        # and will be used as the context for the LLM to generate a response.
+        # The source_documents field is what will be returned to the frontend
+        docs = query_response.llm_docs or []
+        if not docs:
+            return ChatResponse(
+                response="Not found in retrieved documents. Please ensure the article is indexed.",
+                source_documents=[],
+            )
 
         retrieved_docs = "\n\n".join(f"""
-        [Document: {i+1}]
+        [Document {i+1}]
         Title: {doc.title}
         Article ID: {doc.article_id}
-        URL: {doc.url}
-        Abstract: {doc.abstract}
+        Section: {doc.section}
+        Content: {doc.combined_text}
         """ for i, doc in enumerate(docs))
 
         print("\n=== RETRIEVED DOCS ===")
@@ -55,9 +64,6 @@ class RAGPipeline:
                 ChatMessage(
                     role="user",
                     content=f"""
-                    Context:
-                    {retrieved_docs}
-
                     Question:
                     {last_user_message}
                     """,
@@ -69,7 +75,5 @@ class RAGPipeline:
 
         return ChatResponse(
             response=response.response,
-            source_documents=[
-                doc.model_dump(exclude=["abstract"]) for doc in query_response.source_documents
-            ],
+            source_documents=query_response.source_documents,
         )
