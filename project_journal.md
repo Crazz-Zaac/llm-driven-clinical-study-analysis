@@ -413,6 +413,16 @@ llama3.2:3b, qwen2.5:3b (1.9GB), gemma3:1b(1.2GB), qwen3:3b (2.1GB), phi4-mini:3
 
 - The model response was including multiple duplicate articles in the source documents which is indeed correct because the same article can have multiple chunks that are relevant to the query as I'm chunking all the sections of the paper separately. However, to avoid confusion for the user, I now created a `source_document_schema.py` that includes only relevant information (article_id, url, title and score) for the user. For LLM's context we use `llm_docs` with all the information and metadata of the retrieved chunks.
 
+---
+
+## 2026-06-04
+
+- Integrated the backend API with the frontend
+  - Added functionality in the frontend to allow users to pull and activate embedding and chat models from ollama through the API
+  - Added functionality in the frontend to allow users to upload PDFs or fetch articles from nature journal and then index them through the API
+  - Added functionality in the frontend to allow users to ask questions and get responses using both local and remote models through the API
+  - Updated the UI/UX design to accommodate the new functionalities and make it more user-friendly
+````
 
 TODO:
 - A way to ask a list of questions to all the papers and get the answers in a structured format
