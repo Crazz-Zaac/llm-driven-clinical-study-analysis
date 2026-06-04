@@ -16,7 +16,6 @@ import {
   Info,
   Shield,
   AlertCircle,
-  Database
 } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 
@@ -32,20 +31,15 @@ export function HostedModelsSection() {
   const {
     hostedModelName,
     hostedApiKey,
+    hostedProvider,
     useHostedModels,
-    selectedEmbeddingModel,
-    localModels,
     setHostedModelName,
     setHostedApiKey,
-    setSelectedEmbeddingModel,
-    indexingState,
-    setNeedsReindex,
+    setHostedProvider,
   } = useAppStore()
 
   const [showApiKey, setShowApiKey] = useState(false)
   const [apiKeySaved, setApiKeySaved] = useState(false)
-
-  const embeddingModels = localModels.filter(m => m.type === "embedding" && m.status === "downloaded")
 
   const handleApiKeyChange = (value: string) => {
     setHostedApiKey(value)
@@ -59,18 +53,25 @@ export function HostedModelsSection() {
     }
   }
 
-  const handleEmbeddingModelChange = (modelId: string) => {
-    setSelectedEmbeddingModel(modelId)
-    // Trigger reindex if there are context sources and the model changed
-    if (indexingState.lastEmbeddingModel && indexingState.lastEmbeddingModel !== modelId) {
-      setNeedsReindex(true)
-    }
+  const providerLabels: Record<string, string> = {
+    huggingface: "Hugging Face",
+    openai: "OpenAI",
+    anthropic: "Anthropic",
   }
 
-  const maskApiKey = (key: string) => {
-    if (!key) return ""
-    if (key.length <= 8) return "*".repeat(key.length)
-    return key.slice(0, 4) + "*".repeat(key.length - 8) + key.slice(-4)
+  const providerLinks: Record<string, { label: string; href: string }> = {
+    huggingface: {
+      label: "Get Hugging Face token",
+      href: "https://huggingface.co/settings/tokens",
+    },
+    openai: {
+      label: "Get OpenAI API key",
+      href: "https://platform.openai.com/api-keys",
+    },
+    anthropic: {
+      label: "Get Anthropic API key",
+      href: "https://console.anthropic.com/settings/keys",
+    },
   }
 
   if (!useHostedModels) {
@@ -87,6 +88,20 @@ export function HostedModelsSection() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
+        <div className="space-y-3">
+          <Label htmlFor="provider">Provider</Label>
+          <Select value={hostedProvider} onValueChange={setHostedProvider}>
+            <SelectTrigger id="provider">
+              <SelectValue placeholder="Select provider" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="huggingface">Hugging Face</SelectItem>
+              <SelectItem value="openai">OpenAI</SelectItem>
+              <SelectItem value="anthropic">Anthropic</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
         {/* API Key Section */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
@@ -106,7 +121,7 @@ export function HostedModelsSection() {
               <Input
                 id="api-key"
                 type={showApiKey ? "text" : "password"}
-                placeholder="Enter your API key (e.g., hf_...)"
+                placeholder={`Enter your ${providerLabels[hostedProvider] ?? "provider"} API key`}
                 value={hostedApiKey}
                 onChange={(e) => handleApiKeyChange(e.target.value)}
                 className="pr-10 font-mono"
@@ -135,14 +150,16 @@ export function HostedModelsSection() {
               <Shield className="h-3 w-3" />
               Stored locally in your browser - encrypted at rest
             </span>
-            <a
-              href="https://huggingface.co/settings/tokens"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-primary hover:underline"
-            >
-              Get Hugging Face token <ExternalLink className="h-3 w-3" />
-            </a>
+            {providerLinks[hostedProvider] && (
+              <a
+                href={providerLinks[hostedProvider].href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-primary hover:underline"
+              >
+                {providerLinks[hostedProvider].label} <ExternalLink className="h-3 w-3" />
+              </a>
+            )}
           </div>
         </div>
 
@@ -158,43 +175,6 @@ export function HostedModelsSection() {
           <p className="text-xs text-muted-foreground">
             Enter the full model identifier from your provider (e.g., Hugging Face Hub path)
           </p>
-        </div>
-
-        {/* Embedding Model Selection */}
-        <div className="space-y-3">
-          <Label htmlFor="embedding-model" className="flex items-center gap-2">
-            <Database className="h-4 w-4" />
-            Embedding Model
-          </Label>
-          {embeddingModels.length > 0 ? (
-            <>
-              <Select
-                value={selectedEmbeddingModel || ""}
-                onValueChange={handleEmbeddingModelChange}
-              >
-                <SelectTrigger id="embedding-model">
-                  <SelectValue placeholder="Select an embedding model" />
-                </SelectTrigger>
-                <SelectContent>
-                  {embeddingModels.map((model) => (
-                    <SelectItem key={model.id} value={model.id}>
-                      {model.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                The embedding model is used to create vector representations of documents for semantic search and retrieval.
-              </p>
-            </>
-          ) : (
-            <Alert>
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription>
-                No local embedding models available. Please download an embedding model in the Models tab to enable context-aware search.
-              </AlertDescription>
-            </Alert>
-          )}
         </div>
 
         {/* Popular Models */}

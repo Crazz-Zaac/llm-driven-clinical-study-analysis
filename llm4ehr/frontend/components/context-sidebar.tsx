@@ -1,7 +1,6 @@
 "use client"
 
 import { useAppStore } from "@/lib/store"
-import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
@@ -12,8 +11,16 @@ import {
     Zap,
     ChevronDown,
 } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { cn } from "@/lib/utils"
+
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "/api/v1"
+
+type FetchedArticle = {
+    article_id: string
+    title?: string | null
+    url: string
+}
 
 interface SidebarSection {
     title: string
@@ -25,6 +32,7 @@ export function ContextSidebar() {
     const {
         contextSources,
         selectedChatModel,
+        selectedEmbeddingModel,
         useHostedModels,
         hostedModelName,
         temperature,
@@ -36,6 +44,7 @@ export function ContextSidebar() {
         model: true,
         parameters: true,
     })
+    const [fetchedArticles, setFetchedArticles] = useState<FetchedArticle[]>([])
 
     const toggleSection = (section: keyof typeof expandedSections) => {
         setExpandedSections(prev => ({
@@ -44,9 +53,31 @@ export function ContextSidebar() {
         }))
     }
 
-    const pdfSources = contextSources.filter(s => s.type === "pdf")
-    const urlSources = contextSources.filter(s => s.type === "url")
+    const documentSources = [...contextSources].sort((a, b) => a.name.localeCompare(b.name))
+    const sortedFetchedArticles = [...fetchedArticles].sort((a, b) => {
+        const titleA = (a.title ?? a.article_id).toLowerCase()
+        const titleB = (b.title ?? b.article_id).toLowerCase()
+        return titleA.localeCompare(titleB)
+    })
+    const documentsCount = sortedFetchedArticles.length > 0 ? sortedFetchedArticles.length : documentSources.length
     const activeModelName = useHostedModels ? hostedModelName : selectedChatModel
+
+    useEffect(() => {
+        const loadFetchedArticles = async () => {
+            try {
+                const response = await fetch(`${API_BASE}/fetch/list`)
+                if (!response.ok) {
+                    return
+                }
+                const data = await response.json()
+                setFetchedArticles(data.articles ?? [])
+            } catch {
+                setFetchedArticles([])
+            }
+        }
+
+        loadFetchedArticles()
+    }, [])
 
     const Section = ({
         id,
@@ -72,7 +103,7 @@ export function ContextSidebar() {
                     {!isEmpty && (
                         <Badge variant="secondary" className="text-xs ml-auto mr-2">
                             {id === "documents"
-                                ? contextSources.length
+                                ? documentsCount
                                 : id === "model"
                                     ? activeModelName
                                         ? "Active"
@@ -113,9 +144,9 @@ export function ContextSidebar() {
                             id="documents"
                             title="Documents"
                             icon={<FileText className="h-4 w-4" />}
-                            isEmpty={contextSources.length === 0}
+                            isEmpty={documentsCount === 0}
                         >
-                            {contextSources.length === 0 ? (
+                            {documentsCount === 0 ? (
                                 <div className="py-2 text-xs text-muted-foreground">
                                     <p>No documents added yet.</p>
                                     <p className="mt-1">
@@ -124,54 +155,60 @@ export function ContextSidebar() {
                                 </div>
                             ) : (
                                 <div className="space-y-2">
-                                    {pdfSources.length > 0 && (
-                                        <div>
-                                            <p className="text-xs font-medium text-muted-foreground mb-1">
-                                                PDFs ({pdfSources.length})
-                                            </p>
-                                            <div className="space-y-1">
-                                                {pdfSources.slice(0, 3).map(source => (
-                                                    <div
-                                                        key={source.id}
-                                                        className="text-xs p-1.5 rounded bg-muted/50 truncate hover:bg-muted transition-colors"
-                                                        title={source.name}
-                                                    >
-                                                        {source.name}
-                                                    </div>
-                                                ))}
-                                                {pdfSources.length > 3 && (
-                                                    <div className="text-xs p-1.5 text-muted-foreground italic">
-                                                        +{pdfSources.length - 3} more
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {urlSources.length > 0 && (
-                                        <div>
-                                            <p className="text-xs font-medium text-muted-foreground mb-1">
-                                                URLs ({urlSources.length})
-                                            </p>
-                                            <div className="space-y-1">
-                                                {urlSources.slice(0, 3).map(source => (
-                                                    <div
-                                                        key={source.id}
-                                                        className="text-xs p-1.5 rounded bg-muted/50 truncate hover:bg-muted transition-colors flex items-center gap-1"
-                                                        title={source.name}
-                                                    >
-                                                        <LinkIcon className="h-3 w-3 shrink-0 text-muted-foreground" />
-                                                        {source.name}
-                                                    </div>
-                                                ))}
-                                                {urlSources.length > 3 && (
-                                                    <div className="text-xs p-1.5 text-muted-foreground italic">
-                                                        +{urlSources.length - 3} more
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </div>
-                                    )}
+                                    <p className="text-xs font-medium text-muted-foreground mb-1">
+                                        Papers ({documentsCount})
+                                    </p>
+                                    <div className="space-y-1 max-h-72 overflow-y-auto pr-1">
+                                        {sortedFetchedArticles.length > 0 ? (
+                                            sortedFetchedArticles.map(article => (
+                                                <div
+                                                    key={article.article_id}
+                                                    className="text-xs p-1.5 rounded bg-muted/50 hover:bg-muted transition-colors flex items-start gap-1"
+                                                    title={article.title ?? article.article_id}
+                                                >
+                                                    <FileText className="h-3 w-3 shrink-0 text-muted-foreground mt-0.5" />
+                                                    {article.url ? (
+                                                        <a
+                                                            href={article.url}
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            className="line-clamp-2 text-primary hover:underline"
+                                                        >
+                                                            {article.title ?? article.article_id}
+                                                        </a>
+                                                    ) : (
+                                                        <span className="line-clamp-2">{article.title ?? article.article_id}</span>
+                                                    )}
+                                                </div>
+                                            ))
+                                        ) : (
+                                            documentSources.map(source => (
+                                                <div
+                                                    key={source.id}
+                                                    className="text-xs p-1.5 rounded bg-muted/50 hover:bg-muted transition-colors flex items-start gap-1"
+                                                    title={source.name}
+                                                >
+                                                    {source.type === "url" ? (
+                                                        <LinkIcon className="h-3 w-3 shrink-0 text-muted-foreground mt-0.5" />
+                                                    ) : (
+                                                        <FileText className="h-3 w-3 shrink-0 text-muted-foreground mt-0.5" />
+                                                    )}
+                                                    {source.url ? (
+                                                        <a
+                                                            href={source.url}
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            className="line-clamp-2 text-primary hover:underline"
+                                                        >
+                                                            {source.name}
+                                                        </a>
+                                                    ) : (
+                                                        <span className="line-clamp-2">{source.name}</span>
+                                                    )}
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
                                 </div>
                             )}
                         </Section>
@@ -198,6 +235,14 @@ export function ContextSidebar() {
                                             {activeModelName}
                                         </div>
                                     </div>
+                                    {selectedEmbeddingModel && (
+                                        <div className="text-xs">
+                                            <p className="text-muted-foreground mb-1">Selected Embedding Model</p>
+                                            <div className="p-2 rounded bg-muted/50 font-mono text-xs break-words">
+                                                {selectedEmbeddingModel}
+                                            </div>
+                                        </div>
+                                    )}
                                     <div className="text-xs">
                                         <p className="text-muted-foreground mb-1">Type</p>
                                         <Badge variant="outline" className="text-xs">

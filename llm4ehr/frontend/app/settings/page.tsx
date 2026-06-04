@@ -12,9 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { ModelSourceSection } from "@/components/settings/model-source-section"
-import { LocalModelsSection } from "@/components/settings/local-models-section"
 import { HostedModelsSection } from "@/components/settings/hosted-models-section"
-import { EmbeddingModelSection } from "@/components/settings/embedding-model-section"
 import { ParametersSection } from "@/components/settings/parameters-section"
 import { ContextSection } from "@/components/settings/context-section"
 
@@ -74,9 +72,7 @@ function SettingsPageContent() {
             </TabsList>
 
             <TabsContent value="models" className="space-y-6">
-              <EmbeddingModelSection />
               <ModelSourceSection />
-              <LocalModelsSection />
               <HostedModelsSection />
             </TabsContent>
 

@@ -1,5 +1,7 @@
+import json
 import logging
 from fastapi import APIRouter, HTTPException, status
+from fastapi.responses import StreamingResponse
 
 from app.schemas.ollama_models_schema import (
     PullModelRequest,
@@ -35,6 +37,19 @@ async def pull_model(request: PullModelRequest):
             "message": f"Model '{request.model_name}' downloaded successfully",
         }
 
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/pull-stream")
+async def pull_model_stream(request: PullModelRequest):
+    try:
+
+        def stream():
+            for payload in OllamaService.pull_model_stream(request.model_name):
+                yield json.dumps(payload) + "\n"
+
+        return StreamingResponse(stream(), media_type="application/json")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -76,7 +91,15 @@ async def activate_model(request: ActivateModelRequest):
 async def list_models():
 
     try:
-        return OllamaService.list_models()
+        data = OllamaService.list_models()
+        models = data.get("models", [])
+        for model in models:
+            name = (model.get("name") or "").lower()
+            if "embed" in name or "embedding" in name:
+                model["model_type"] = "embedding"
+            else:
+                model["model_type"] = "chat"
+        return data
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

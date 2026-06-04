@@ -6,10 +6,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Progress } from "@/components/ui/progress"
 import {
-  Link,
   Upload,
   FileText,
   Trash2,
@@ -17,7 +17,6 @@ import {
   CheckCircle2,
   Loader2,
   AlertCircle,
-  ExternalLink,
   Info,
   BookOpen,
   Files,
@@ -25,6 +24,14 @@ import {
   Database,
   RefreshCw
 } from "lucide-react"
+
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "/api/v1"
+
+type FetchedArticle = {
+  article_id: string
+  title?: string | null
+  url: string
+}
 
 export function ContextSection() {
   const {
@@ -36,12 +43,25 @@ export function ContextSection() {
     updateContextSource,
     startIndexing,
     completeIndexing,
+    stopIndexing,
     setNeedsReindex,
   } = useAppStore()
 
-  const [urlInput, setUrlInput] = useState("")
   const [isDragging, setIsDragging] = useState(false)
   const [indexingProgress, setIndexingProgress] = useState(0)
+  const [indexingMessage, setIndexingMessage] = useState<string | null>(null)
+  const [indexingError, setIndexingError] = useState<string | null>(null)
+  const [fetchQuery, setFetchQuery] = useState("")
+  const [fetchMaxResults, setFetchMaxResults] = useState("20")
+  const [resetCursorQuery, setResetCursorQuery] = useState("")
+  const [batchUrls, setBatchUrls] = useState("")
+  const [fetchStatus, setFetchStatus] = useState<string | null>(null)
+  const [fetchError, setFetchError] = useState<string | null>(null)
+  const [isFetching, setIsFetching] = useState(false)
+  const [isListingFetched, setIsListingFetched] = useState(false)
+  const [fetchedArticles, setFetchedArticles] = useState<FetchedArticle[]>([])
+  const [selectedArticleIds, setSelectedArticleIds] = useState<string[]>([])
+  const [indexingTarget, setIndexingTarget] = useState<"context" | "fetched">("context")
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Track previous source count to detect new additions
@@ -55,76 +75,240 @@ export function ContextSection() {
     prevSourceCountRef.current = contextSources.length
   }, [contextSources.length, indexingState.lastIndexedAt, setNeedsReindex])
 
-  const handleStartIndexing = () => {
-    startIndexing()
+  const handleStartIndexing = async () => {
+    setIndexingError(null)
+    setIndexingMessage(null)
     setIndexingProgress(0)
-
-    // Simulate indexing progress
-    const interval = setInterval(() => {
-      setIndexingProgress(prev => {
-        if (prev >= 100) {
-          clearInterval(interval)
-          completeIndexing()
-          return 100
-        }
-        return prev + Math.random() * 15
-      })
-    }, 300)
+    setIndexingTarget("context")
+    startIndexing()
+    try {
+      const response = await fetch(`${API_BASE}/index/all`, { method: "POST" })
+      if (!response.ok) {
+        const message = await response.text()
+        throw new Error(message || "Indexing failed")
+      }
+      const data = await response.json()
+      setIndexingMessage(`Indexed ${data.indexed_count ?? 0} documents`)
+      setIndexingProgress(100)
+      completeIndexing()
+    } catch (error) {
+      setIndexingError(error instanceof Error ? error.message : "Indexing failed")
+      stopIndexing()
+    }
   }
 
-  const handleAddUrls = () => {
-    if (!urlInput.trim()) return
+  const handleStopIndexing = async () => {
+    setIndexingError(null)
+    setIndexingMessage(null)
+    try {
+      const response = await fetch(`${API_BASE}/index/stop`, { method: "POST" })
+      if (!response.ok) {
+        const message = await response.text()
+        throw new Error(message || "Stop indexing failed")
+      }
+      const data = await response.json()
+      setIndexingMessage(data.message ?? "Indexing stop requested")
+      stopIndexing()
+      setIndexingProgress(0)
+    } catch (error) {
+      setIndexingError(error instanceof Error ? error.message : "Stop indexing failed")
+      stopIndexing()
+    }
+  }
 
-    // Split by newlines, commas, or spaces and filter empty entries
-    const urls = urlInput
+  const handleDeleteIndex = async (deleteAll: boolean) => {
+    setIndexingError(null)
+    setIndexingMessage(null)
+    try {
+      const body = deleteAll
+        ? { delete_all: true, article_ids: [] }
+        : { delete_all: false, article_ids: selectedArticleIds }
+      const response = await fetch(`${API_BASE}/index`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+      if (!response.ok) {
+        const message = await response.text()
+        throw new Error(message || "Delete failed")
+      }
+      const data = await response.json()
+      setIndexingMessage(`Deleted ${data.deleted_count ?? 0} indexed documents`)
+      stopIndexing()
+      setIndexingProgress(0)
+    } catch (error) {
+      setIndexingError(error instanceof Error ? error.message : "Delete failed")
+      stopIndexing()
+    }
+  }
+
+  const handleIndexSelected = async () => {
+    if (selectedArticleIds.length === 0) return
+    setIndexingError(null)
+    setIndexingMessage(null)
+    setIndexingProgress(0)
+    startIndexing()
+    setIndexingTarget("fetched")
+    try {
+      const response = await fetch(`${API_BASE}/index/articles`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ article_ids: selectedArticleIds }),
+      })
+      if (!response.ok) {
+        const message = await response.text()
+        throw new Error(message || "Indexing failed")
+      }
+      const data = await response.json()
+      setIndexingMessage(`Indexed ${data.indexed_count ?? 0} documents`)
+      setIndexingProgress(100)
+      completeIndexing()
+    } catch (error) {
+      setIndexingError(error instanceof Error ? error.message : "Indexing failed")
+      stopIndexing()
+    }
+  }
+
+  const handleIndexAllFetched = async () => {
+    if (fetchedArticles.length === 0) return
+    const articleIds = fetchedArticles.map((article) => article.article_id)
+    setIndexingError(null)
+    setIndexingMessage(null)
+    setIndexingProgress(0)
+    startIndexing()
+    setIndexingTarget("fetched")
+    try {
+      const response = await fetch(`${API_BASE}/index/articles`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ article_ids: articleIds }),
+      })
+      if (!response.ok) {
+        const message = await response.text()
+        throw new Error(message || "Indexing failed")
+      }
+      const data = await response.json()
+      setIndexingMessage(`Indexed ${data.indexed_count ?? 0} documents`)
+      setIndexingProgress(100)
+      completeIndexing()
+    } catch (error) {
+      setIndexingError(error instanceof Error ? error.message : "Indexing failed")
+      stopIndexing()
+    }
+  }
+
+  const loadFetchedArticles = useCallback(async () => {
+    setIsListingFetched(true)
+    setFetchError(null)
+    try {
+      const response = await fetch(`${API_BASE}/fetch/list`)
+      if (!response.ok) {
+        const message = await response.text()
+        throw new Error(message || "Failed to list fetched articles")
+      }
+      const data = await response.json()
+      setFetchedArticles(data.articles ?? [])
+    } catch (error) {
+      setFetchError(error instanceof Error ? error.message : "Failed to list fetched articles")
+    } finally {
+      setIsListingFetched(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadFetchedArticles()
+  }, [loadFetchedArticles])
+
+  const handleFetchFromOpenAlex = async () => {
+    if (!fetchQuery.trim()) return
+    setIsFetching(true)
+    setFetchError(null)
+    setFetchStatus(null)
+    try {
+      const response = await fetch(`${API_BASE}/fetch/from-openalex`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query: fetchQuery.trim(),
+          max_results: Number(fetchMaxResults) || 20,
+        }),
+      })
+      if (!response.ok) {
+        const message = await response.text()
+        throw new Error(message || "Fetch failed")
+      }
+      setFetchStatus("Fetch completed. Refresh the list to view articles.")
+      await loadFetchedArticles()
+    } catch (error) {
+      setFetchError(error instanceof Error ? error.message : "Fetch failed")
+    } finally {
+      setIsFetching(false)
+    }
+  }
+
+  const handleResetCursor = async () => {
+    if (!resetCursorQuery.trim()) return
+    setIsFetching(true)
+    setFetchError(null)
+    setFetchStatus(null)
+    const queryTerms = resetCursorQuery
+      .split(",")
+      .map((term) => term.trim())
+      .filter(Boolean)
+    try {
+      const response = await fetch(`${API_BASE}/fetch/reset-cursor`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(queryTerms),
+      })
+      if (!response.ok) {
+        const message = await response.text()
+        throw new Error(message || "Reset cursor failed")
+      }
+      const data = await response.json()
+      setFetchStatus(data.message ?? "Cursor reset")
+    } catch (error) {
+      setFetchError(error instanceof Error ? error.message : "Reset cursor failed")
+    } finally {
+      setIsFetching(false)
+    }
+  }
+
+  const handleBatchFetch = async () => {
+    const urls = batchUrls
       .split(/[\n,\s]+/)
-      .map(url => url.trim())
-      .filter(url => url.length > 0)
-
-    urls.forEach((url) => {
-      // Add https:// if missing
-      let fullUrl = url
-      if (!url.startsWith('http://') && !url.startsWith('https://')) {
-        fullUrl = `https://${url}`
+      .map((url) => url.trim())
+      .filter(Boolean)
+    if (urls.length === 0) return
+    setIsFetching(true)
+    setFetchError(null)
+    setFetchStatus(null)
+    try {
+      const response = await fetch(`${API_BASE}/fetch/batch?save=true`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ urls }),
+      })
+      if (!response.ok) {
+        const message = await response.text()
+        throw new Error(message || "Batch fetch failed")
       }
+      setFetchStatus(`Fetched ${urls.length} article(s).`)
+      setBatchUrls("")
+      await loadFetchedArticles()
+    } catch (error) {
+      setFetchError(error instanceof Error ? error.message : "Batch fetch failed")
+    } finally {
+      setIsFetching(false)
+    }
+  }
 
-      let hostname = ""
-      let displayName = url
-      try {
-        const urlObj = new URL(fullUrl)
-        hostname = urlObj.hostname
-        // Try to extract a meaningful name from the path
-        const pathParts = urlObj.pathname.split('/').filter(Boolean)
-        if (pathParts.length > 0) {
-          displayName = pathParts[pathParts.length - 1].replace(/-/g, ' ')
-          if (displayName.length > 40) {
-            displayName = displayName.slice(0, 40) + '...'
-          }
-        } else {
-          displayName = hostname
-        }
-      } catch {
-        hostname = "Invalid URL"
-        displayName = url.slice(0, 40)
-      }
-
-      const newSource: ContextSource = {
-        id: crypto.randomUUID(),
-        type: "url",
-        name: displayName,
-        url: fullUrl,
-        status: "processing",
-      }
-
-      addContextSource(newSource)
-
-      // Simulate processing with varied times
-      setTimeout(() => {
-        updateContextSource(newSource.id, { status: "ready" })
-      }, 1500 + Math.random() * 2000)
-    })
-
-    setUrlInput("")
+  const toggleArticleSelection = (articleId: string) => {
+    setSelectedArticleIds((prev) =>
+      prev.includes(articleId)
+        ? prev.filter((id) => id !== articleId)
+        : [...prev, articleId]
+    )
   }
 
   const handleFileUpload = useCallback((files: FileList | null) => {
@@ -210,10 +394,9 @@ export function ContextSection() {
 
   const urlSources = contextSources.filter(s => s.type === "url")
   const pdfSources = contextSources.filter(s => s.type === "pdf")
-
-  const clearAllUrls = () => {
-    urlSources.forEach(s => removeContextSource(s.id))
-  }
+  const indexingSourceCount = indexingTarget === "fetched"
+    ? (selectedArticleIds.length || fetchedArticles.length)
+    : contextSources.length
 
   const clearAllPdfs = () => {
     pdfSources.forEach(s => removeContextSource(s.id))
@@ -239,10 +422,10 @@ export function ContextSection() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className={`rounded-lg border p-4 ${indexingState.needsReindex
-              ? "border-amber-500/50 bg-amber-500/5"
-              : indexingState.lastIndexedAt
-                ? "border-accent/50 bg-accent/5"
-                : "border-border"
+            ? "border-amber-500/50 bg-amber-500/5"
+            : indexingState.lastIndexedAt
+              ? "border-accent/50 bg-accent/5"
+              : "border-border"
             }`}>
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div className="space-y-1">
@@ -276,7 +459,10 @@ export function ContextSection() {
                 </div>
                 <div className="text-sm text-muted-foreground">
                   {indexingState.isIndexing ? (
-                    <span>Processing {contextSources.length} source{contextSources.length !== 1 ? 's' : ''}...</span>
+                    <span>
+                      Processing {indexingSourceCount} {indexingTarget === "fetched" ? "fetched article" : "source"}
+                      {indexingSourceCount !== 1 ? 's' : ''}...
+                    </span>
                   ) : indexingState.lastIndexedAt ? (
                     <span>
                       Last indexed: {new Date(indexingState.lastIndexedAt).toLocaleString()}
@@ -294,7 +480,7 @@ export function ContextSection() {
 
               <Button
                 onClick={handleStartIndexing}
-                disabled={indexingState.isIndexing || contextSources.length === 0 || !selectedEmbeddingModel}
+                disabled={indexingState.isIndexing}
                 size="lg"
                 className={`min-w-[160px] ${indexingState.needsReindex ? "bg-amber-600 hover:bg-amber-700" : ""}`}
               >
@@ -317,12 +503,39 @@ export function ContextSection() {
               </Button>
             </div>
 
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Button variant="outline" onClick={handleIndexAllFetched} disabled={fetchedArticles.length === 0 || indexingState.isIndexing}>
+                Index All Fetched
+              </Button>
+              <Button variant="outline" onClick={handleStopIndexing} disabled={!indexingState.isIndexing}>
+                Stop Indexing
+              </Button>
+              <Button variant="outline" onClick={() => handleDeleteIndex(false)} disabled={selectedArticleIds.length === 0 || indexingState.isIndexing}>
+                Delete Selected Index
+              </Button>
+              <Button variant="destructive" onClick={() => handleDeleteIndex(true)} disabled={indexingState.isIndexing}>
+                Delete All Index
+              </Button>
+            </div>
+
             {indexingState.isIndexing && (
               <div className="mt-4 space-y-2">
                 <Progress value={indexingProgress} className="h-2" />
                 <p className="text-xs text-muted-foreground text-center">
                   {Math.round(indexingProgress)}% complete
                 </p>
+              </div>
+            )}
+
+            {indexingMessage && (
+              <div className="mt-3 text-sm text-accent-foreground bg-accent/10 border border-accent/30 rounded-lg p-2">
+                {indexingMessage}
+              </div>
+            )}
+
+            {indexingError && (
+              <div className="mt-3 text-sm text-destructive bg-destructive/10 border border-destructive/30 rounded-lg p-2">
+                {indexingError}
               </div>
             )}
           </div>
@@ -350,102 +563,119 @@ export function ContextSection() {
         </CardContent>
       </Card>
 
-      {/* Nature Journal Access */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <BookOpen className="h-5 w-5" />
-            Nature Journal Access
+            Fetching Papers
           </CardTitle>
           <CardDescription>
-            Connect to Nature journals for accessing research papers. Enter one or multiple URLs
-            (separated by new lines or commas) to include them as context for your conversations.
+            Fetch articles via OpenAlex or direct URLs, then index the fetched content.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label htmlFor="nature-urls">Paper or Collection URLs</Label>
-              <span className="text-xs text-muted-foreground">
-                {urlSources.length} URL{urlSources.length !== 1 ? 's' : ''} added
-              </span>
-            </div>
-            <Textarea
-              id="nature-urls"
-              placeholder={`Enter one or more URLs, one per line:
-https://www.nature.com/articles/s41586-024-...
-https://www.nature.com/articles/s41591-024-...
-nature.com/collections/...`}
-              value={urlInput}
-              onChange={(e) => setUrlInput(e.target.value)}
-              className="min-h-[120px] font-mono text-sm"
-            />
-            <div className="flex gap-2">
-              <Button onClick={handleAddUrls} disabled={!urlInput.trim()} className="flex-1">
-                <Plus className="h-4 w-4 mr-1" />
-                Add URLs
+        <CardContent className="space-y-6">
+          <div className="space-y-3">
+            <Label htmlFor="fetch-query">OpenAlex Query</Label>
+            <div className="flex flex-wrap gap-2">
+              <Input
+                id="fetch-query"
+                placeholder="e.g., prostate cancer radiomics"
+                value={fetchQuery}
+                onChange={(event) => setFetchQuery(event.target.value)}
+                className="flex-1 min-w-[220px]"
+              />
+              <Input
+                type="number"
+                min="1"
+                max="200"
+                value={fetchMaxResults}
+                onChange={(event) => setFetchMaxResults(event.target.value)}
+                className="w-[120px]"
+                placeholder="Max"
+              />
+              <Button onClick={handleFetchFromOpenAlex} disabled={!fetchQuery.trim() || isFetching}>
+                {isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                <span className="ml-2">Run Fetcher</span>
               </Button>
-              {urlSources.length > 0 && (
-                <Button variant="outline" onClick={clearAllUrls}>
-                  <X className="h-4 w-4 mr-1" />
-                  Clear All
-                </Button>
-              )}
             </div>
           </div>
 
-          {/* URL list */}
-          {urlSources.length > 0 && (
-            <div className="space-y-2">
-              <Label>Added URLs</Label>
-              <div className="max-h-[200px] overflow-y-auto space-y-2 rounded-lg border p-2">
-                {urlSources.map((source) => (
-                  <div
-                    key={source.id}
-                    className="flex items-center justify-between p-2 rounded-md bg-muted/50"
-                  >
-                    <div className="flex items-center gap-2 min-w-0 flex-1">
-                      <Link className="h-4 w-4 shrink-0 text-primary" />
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium truncate">{source.name}</p>
-                        {source.url && (
-                          <p className="text-xs text-muted-foreground truncate">{source.url}</p>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      {getStatusBadge(source.status)}
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                        onClick={() => removeContextSource(source.id)}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        <span className="sr-only">Remove URL</span>
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+          <div className="space-y-3">
+            <Label htmlFor="reset-cursor">Reset Cursor (comma-separated terms)</Label>
+            <div className="flex flex-wrap gap-2">
+              <Input
+                id="reset-cursor"
+                placeholder="e.g., prostate, radiomics"
+                value={resetCursorQuery}
+                onChange={(event) => setResetCursorQuery(event.target.value)}
+                className="flex-1 min-w-[220px]"
+              />
+              <Button variant="outline" onClick={handleResetCursor} disabled={!resetCursorQuery.trim() || isFetching}>
+                Reset Cursor
+              </Button>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <Label htmlFor="batch-urls">Batch Fetch URLs</Label>
+            <Textarea
+              id="batch-urls"
+              placeholder="Paste one URL per line"
+              value={batchUrls}
+              onChange={(event) => setBatchUrls(event.target.value)}
+              className="min-h-[120px] font-mono text-sm"
+            />
+            <Button onClick={handleBatchFetch} disabled={!batchUrls.trim() || isFetching}>
+              Fetch URLs
+            </Button>
+          </div>
+
+          {fetchStatus && (
+            <div className="text-sm text-accent-foreground bg-accent/10 border border-accent/30 rounded-lg p-2">
+              {fetchStatus}
             </div>
           )}
 
-          <div className="flex items-start gap-2 rounded-lg bg-muted/50 p-3 text-sm">
-            <Info className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-            <div className="text-muted-foreground">
-              <p>
-                Enter full URLs of Nature papers or collections. The system will fetch and index
-                the content for use in your conversations. Multiple URLs can be added at once.
-              </p>
-              <a
-                href="https://www.nature.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-primary hover:underline mt-1"
-              >
-                Browse Nature journals <ExternalLink className="h-3 w-3" />
-              </a>
+          {fetchError && (
+            <div className="text-sm text-destructive bg-destructive/10 border border-destructive/30 rounded-lg p-2">
+              {fetchError}
+            </div>
+          )}
+
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Label>Fetched Articles</Label>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={loadFetchedArticles} disabled={isListingFetched}>
+                  {isListingFetched ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                  <span className="ml-2">Refresh</span>
+                </Button>
+                <Button variant="outline" size="sm" onClick={handleIndexSelected} disabled={selectedArticleIds.length === 0}>
+                  Index Selected
+                </Button>
+              </div>
+            </div>
+            <div className="max-h-[240px] overflow-y-auto rounded-lg border">
+              {fetchedArticles.length === 0 ? (
+                <div className="p-4 text-sm text-muted-foreground">No fetched articles yet.</div>
+              ) : (
+                fetchedArticles.map((article) => (
+                  <label
+                    key={article.article_id}
+                    className="flex items-center gap-3 px-3 py-2 border-b last:border-b-0 text-sm"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedArticleIds.includes(article.article_id)}
+                      onChange={() => toggleArticleSelection(article.article_id)}
+                    />
+                    <div className="min-w-0">
+                      <p className="font-medium truncate">{article.title ?? article.article_id}</p>
+                      <p className="text-xs text-muted-foreground truncate">{article.url}</p>
+                    </div>
+                  </label>
+                ))
+              )}
             </div>
           </div>
         </CardContent>
@@ -466,8 +696,8 @@ nature.com/collections/...`}
         <CardContent className="space-y-4">
           <div
             className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer ${isDragging
-                ? "border-primary bg-primary/5"
-                : "border-border hover:border-primary/50"
+              ? "border-primary bg-primary/5"
+              : "border-border hover:border-primary/50"
               }`}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
@@ -551,145 +781,6 @@ nature.com/collections/...`}
         </CardContent>
       </Card>
 
-      {/* Indexing & Summary Card */}
-      <Card className={indexingState.needsReindex ? "border-amber-500/50" : ""}>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Database className="h-5 w-5" />
-            Indexing & Summary
-          </CardTitle>
-          <CardDescription>
-            Index your context sources for efficient retrieval during conversations.
-            Re-indexing is needed when you change the embedding model or add new documents.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {/* Indexing Status */}
-          <div className={`rounded-lg border p-4 ${indexingState.needsReindex
-              ? "border-amber-500/50 bg-amber-500/5"
-              : indexingState.lastIndexedAt
-                ? "border-accent/50 bg-accent/5"
-                : "border-border"
-            }`}>
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  {indexingState.isIndexing ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                      <span className="font-medium">Indexing in progress...</span>
-                    </>
-                  ) : indexingState.needsReindex ? (
-                    <>
-                      <RefreshCw className="h-4 w-4 text-amber-500" />
-                      <span className="font-medium text-amber-600 dark:text-amber-400">Re-indexing required</span>
-                    </>
-                  ) : indexingState.lastIndexedAt ? (
-                    <>
-                      <CheckCircle2 className="h-4 w-4 text-accent" />
-                      <span className="font-medium">Index up to date</span>
-                    </>
-                  ) : (
-                    <>
-                      <AlertCircle className="h-4 w-4 text-muted-foreground" />
-                      <span className="font-medium">Not indexed yet</span>
-                    </>
-                  )}
-                </div>
-                <div className="text-sm text-muted-foreground">
-                  {indexingState.isIndexing ? (
-                    <span>Processing {contextSources.length} source{contextSources.length !== 1 ? 's' : ''}...</span>
-                  ) : indexingState.lastIndexedAt ? (
-                    <span>
-                      Last indexed: {new Date(indexingState.lastIndexedAt).toLocaleString()}
-                      {indexingState.lastEmbeddingModel && (
-                        <span className="ml-2 font-mono text-xs">({indexingState.lastEmbeddingModel})</span>
-                      )}
-                    </span>
-                  ) : (
-                    <span>Click &quot;Start Indexing&quot; to enable context-aware conversations</span>
-                  )}
-                </div>
-              </div>
-
-              <Button
-                onClick={handleStartIndexing}
-                disabled={indexingState.isIndexing || contextSources.length === 0 || !selectedEmbeddingModel}
-                className={indexingState.needsReindex ? "bg-amber-600 hover:bg-amber-700" : ""}
-              >
-                {indexingState.isIndexing ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Indexing...
-                  </>
-                ) : indexingState.needsReindex ? (
-                  <>
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    Re-Index Now
-                  </>
-                ) : (
-                  <>
-                    <Database className="h-4 w-4 mr-2" />
-                    Start Indexing
-                  </>
-                )}
-              </Button>
-            </div>
-
-            {indexingState.isIndexing && (
-              <div className="mt-4 space-y-2">
-                <Progress value={indexingProgress} className="h-2" />
-                <p className="text-xs text-muted-foreground text-center">
-                  {Math.round(indexingProgress)}% complete
-                </p>
-              </div>
-            )}
-          </div>
-
-          {!selectedEmbeddingModel && contextSources.length > 0 && (
-            <div className="flex items-start gap-2 rounded-lg bg-amber-500/10 border border-amber-500/30 p-3 text-sm">
-              <AlertCircle className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
-              <p className="text-amber-700 dark:text-amber-300">
-                Please select an embedding model in the Models tab before indexing your documents.
-              </p>
-            </div>
-          )}
-
-          {/* Stats Grid */}
-          <div className="grid gap-4 sm:grid-cols-3">
-            <div className="rounded-lg border p-4 text-center">
-              <div className="text-3xl font-bold text-primary">{contextSources.length}</div>
-              <p className="text-sm text-muted-foreground">Total Sources</p>
-            </div>
-            <div className="rounded-lg border p-4 text-center">
-              <div className="text-3xl font-bold text-primary">{urlSources.length}</div>
-              <p className="text-sm text-muted-foreground">URLs Added</p>
-            </div>
-            <div className="rounded-lg border p-4 text-center">
-              <div className="text-3xl font-bold text-primary">{pdfSources.length}</div>
-              <p className="text-sm text-muted-foreground">PDFs Uploaded</p>
-            </div>
-          </div>
-
-          {contextSources.length > 0 && (
-            <div className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4 text-accent" />
-                <span className="text-sm">
-                  {contextSources.filter(s => s.status === "ready").length} of {contextSources.length} sources ready
-                </span>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => contextSources.forEach(s => removeContextSource(s.id))}
-              >
-                Clear All Sources
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
     </div>
   )
 }
