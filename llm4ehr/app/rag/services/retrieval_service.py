@@ -66,6 +66,7 @@ class RetrievalService:
             # single highest-scoring chunk (which is often an overview-level passage) from
             # being the only content the LLM sees for that article.
             llm_docs = []
+            print(f"Length of chunks_per_article: {len(chunks_per_article)}")
             for article_id, chunks in chunks_per_article.items():
                 if not chunks:
                     continue
@@ -106,6 +107,8 @@ class RetrievalService:
 
             # Sort by best score and cap to the requested top_k unique articles
             llm_docs = sorted(llm_docs, key=lambda d: d.score, reverse=True)[:top_k]
+            print(f"Contents of retrieved document: \n {[doc.combined_text[:200] for doc in llm_docs]}")
+            print(f"")
 
             # Converting the RetrievedDocument list to SourceDocument with score for the user response
             user_docs = [
