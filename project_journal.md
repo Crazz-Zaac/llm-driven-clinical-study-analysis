@@ -445,3 +445,4 @@ TODO:
 - Add the info about the mimic-iv dataset in the context 
 - Add the info about ICD taxonomy in the context
 - Reproducibility of papers -> [target (do they include ), cohort definition(do they include the ICD codes, OPS code)]
+- Implement late chunking and for this use a bigger context sized window model like `bge-m3` (8k), `qwen3-embedding` (32k to 40k)
