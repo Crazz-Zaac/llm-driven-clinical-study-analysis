@@ -13,9 +13,8 @@ from app.core.config import settings
 class IndexingService:
     """Service for indexing documents into the vector database."""
 
-    _stop_requested = False
-
     def __init__(self):
+        self._stop_requested = False
         self.embedder = TextEmbedder()
         self.chunker = TextChunker()
         self.vector_db = QdrantVectorDB()
@@ -66,6 +65,7 @@ class IndexingService:
                                 "article_id": doc.get("article_id", ""),
                                 "url": doc.get("url", ""),
                                 "title": doc.get("title", ""),
+                                "abstract": doc.get("abstract", ""),
                                 "section": section_name,
                                 "combined_text": chunk_text,
                                 "chunk_index": i,
@@ -127,11 +127,11 @@ class IndexingService:
 
     def stop_indexing(self):
         """Signal the indexing loop to stop."""
-        IndexingService._stop_requested = True
+        self._stop_requested = True
 
     def resume_indexing(self):
         """Reset stop signal to allow indexing."""
-        IndexingService._stop_requested = False
+        self._stop_requested = False
 
     # deletes the collection and all its data from the vector database, and then recreates it to ensure a clean state
     def delete_collection(self):

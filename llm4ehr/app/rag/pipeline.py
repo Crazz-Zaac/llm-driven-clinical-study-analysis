@@ -1,8 +1,12 @@
+import logging
+
 from app.rag.services import RetrievalService
 from app.rag.llm.ollama_chat_model import OllamaChatModel
 from app.rag.prompts.system_prompt import SYSTEM_PROMPT
 from app.schemas.chat_schema import ChatMessage, ChatRequest, ChatResponse
 from app.schemas.retrieval_schema import QueryRequest
+
+logger = logging.getLogger(__name__)
 
 
 class RAGPipeline:
@@ -21,11 +25,19 @@ class RAGPipeline:
 
         last_user_message = user_messages[-1].content
 
-        print("\n=== LAST USER MESSAGE ===")
-        print(last_user_message)
+        # Build context-aware retrieval query from recent user turns.
+        # Deduplicate consecutive identical turns to avoid a doubled query when the
+        # frontend echoes the same message in the conversation history.
+        deduped_turns: list[str] = []
+        for msg in request.messages:
+            if msg.role == "user" and (not deduped_turns or msg.content != deduped_turns[-1]):
+                deduped_turns.append(msg.content)
+        retrieval_query = " ".join(deduped_turns[-3:])
+
+        logger.debug("Retrieval query: %s", retrieval_query)
 
         query_response = self.retrieval_service.retrieve(
-            QueryRequest(query=last_user_message)
+            QueryRequest(query=retrieval_query)
         )
 
         # the documents retrieved from the vector database are in the llm_docs field of the response schema
@@ -46,8 +58,7 @@ class RAGPipeline:
         Content: {doc.combined_text}
         """ for i, doc in enumerate(docs))
 
-        print("\n=== RETRIEVED DOCS ===")
-        print(retrieved_docs)
+        logger.debug("Retrieved docs:\n%s", retrieved_docs)
 
         sys_prompt = f"""
         {SYSTEM_PROMPT}

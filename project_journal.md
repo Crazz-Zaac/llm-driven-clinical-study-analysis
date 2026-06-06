@@ -422,7 +422,20 @@ llama3.2:3b, qwen2.5:3b (1.9GB), gemma3:1b(1.2GB), qwen3:3b (2.1GB), phi4-mini:3
   - Added functionality in the frontend to allow users to upload PDFs or fetch articles from nature journal and then index them through the API
   - Added functionality in the frontend to allow users to ask questions and get responses using both local and remote models through the API
   - Updated the UI/UX design to accommodate the new functionalities and make it more user-friendly
-````
+
+---
+
+## 2026-06-05
+
+- Updated `retrieval_schema.py` to include `top_k` field in the `QueryRequest` which allows users to specify how many relevant chunks they want to retrieve from the vector database.
+- Updated the `indexing_service.py` to include abstract as well in the payload of the point when indexing the chunks. Initially, I was unknowingly leaving out the abstract from the indexed metadata which is an important part of the paper and can provide valuable context for the LLM during retrieval.
+- Updated the `retrieval_service.py` to have `max_chunks_per_article` parameter which limits the number of chunks retrieved per article. 
+
+---
+
+## 2026-06-06
+
+-
 
 TODO:
 - A way to ask a list of questions to all the papers and get the answers in a structured format

@@ -1,9 +1,11 @@
-from fastapi import APIRouter, HTTPException, logger, status
-from fastapi import APIRouter
+import asyncio
 import logging
+
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.rag.pipeline import RAGPipeline
 from app.rag.pipeline_remote import RAGPipelineRemote
+from app.api.dependencies.deps import get_rag_pipeline, get_remote_rag_pipeline
 from app.schemas.chat_schema import ChatRequest, ChatResponse
 
 router = APIRouter(prefix="", tags=["Chat"])
@@ -12,7 +14,10 @@ logger = logging.getLogger(__name__)
 
 # Local RAG pipeline endpoint
 @router.post("/rag/local", response_model=ChatResponse, status_code=status.HTTP_200_OK)
-async def rag_chat(request: ChatRequest):
+async def rag_chat(
+    request: ChatRequest,
+    rag_pipeline: RAGPipeline = Depends(get_rag_pipeline),
+):
     """
     RAG pipeline endpoint: retrieves documents and generates response using chat model.
 
@@ -25,8 +30,11 @@ async def rag_chat(request: ChatRequest):
     """
     try:
         logger.info("Processing RAG pipeline request...")
-        rag_pipeline = RAGPipeline()
-        response = rag_pipeline.run(request)
+        # Run the synchronous pipeline in a threadpool so the event loop stays
+        # free to handle other requests (e.g. fetch/list) while LLM inference
+        # is in progress. Without this, requests.post() inside the pipeline
+        # blocks the entire event loop for the duration of Ollama inference.
+        response = await asyncio.to_thread(rag_pipeline.run, request)
 
         if response.response:
             logger.info("RAG response generated successfully")
@@ -42,9 +50,12 @@ async def rag_chat(request: ChatRequest):
         )
 
 
-# REmote RAG pipeline endpoint (calls external API)
+# Remote RAG pipeline endpoint (calls external API)
 @router.post("/rag/remote", response_model=ChatResponse, status_code=status.HTTP_200_OK)
-async def rag_chat_remote(request: ChatRequest):
+async def rag_chat_remote(
+    request: ChatRequest,
+    rag_pipeline: RAGPipelineRemote = Depends(get_remote_rag_pipeline),
+):
     """
     RAG pipeline endpoint that calls an external API for processing.
 
@@ -53,8 +64,7 @@ async def rag_chat_remote(request: ChatRequest):
     """
     try:
         logger.info("Processing remote RAG pipeline request...")
-        rag_pipeline = RAGPipelineRemote()
-        response = rag_pipeline.run(request)
+        response = await asyncio.to_thread(rag_pipeline.run, request)
 
         if response.response:
             logger.info("Remote RAG response generated successfully")

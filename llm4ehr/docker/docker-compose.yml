@@ -84,11 +84,13 @@ services:
       dockerfile: docker/Dockerfile.frontend
       args:
         API_BASE_URL: http://backend:8000
+        NEXT_PUBLIC_API_BASE: http://localhost:8001/api/v1
     container_name: llm4ehr-frontend
     ports:
       - "3000:3000"    # Next.js server
     environment:
       - API_BASE_URL=http://backend:8000
+      - NEXT_PUBLIC_API_BASE=http://localhost:8001/api/v1
     # env_file:
     #   - ../.env
     networks:
