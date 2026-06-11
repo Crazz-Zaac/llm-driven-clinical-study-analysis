@@ -7,7 +7,7 @@ def run_rag():
 
     request = ChatRequest(
         messages=[
-            ChatMessage(role="user", content="How many patients were included in the study of anti-T-lymphocyte?"),
+            ChatMessage(role="user", content="Which algorithm was used for feature selection in the paper 'Association between triglyceride-glucose index and in-hospital mortality in critically ill patients with sepsis: analysis of the MIMIC-IV database'?"),
         ]
     )
 

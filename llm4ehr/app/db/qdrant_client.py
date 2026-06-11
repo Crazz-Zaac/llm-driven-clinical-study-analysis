@@ -34,6 +34,7 @@ class QdrantVectorDB:
             query=query_vector,
             limit=top_k,
             with_payload=True,
+            with_vectors=False, # we don't need to return the vectors themselves, just the payload and scores
         )
         # returning the points with payload for further processing in the retrieval service
         return response.points

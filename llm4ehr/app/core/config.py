@@ -1,8 +1,8 @@
 from dotenv import load_dotenv
 import os
 
-os.environ["TRANSFORMERS_OFFLINE"] = "1"
-os.environ["HF_DATASETS_OFFLINE"] = "1"
+# os.environ["TRANSFORMERS_OFFLINE"] = "1"
+# os.environ["HF_DATASETS_OFFLINE"] = "1"
 
 # Load environment variables from .env file
 load_dotenv()

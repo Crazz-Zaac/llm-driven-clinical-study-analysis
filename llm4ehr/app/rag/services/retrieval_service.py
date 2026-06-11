@@ -2,6 +2,7 @@ import logging
 from collections import defaultdict
 
 from app.rag.embeddings.embedder import TextEmbedder
+from app.rag.reranking.reranker import Reranker
 from app.db.qdrant_client import QdrantVectorDB
 from app.schemas.retrieval_schema import QueryRequest, QueryResponse, RetrievedDocument
 from app.schemas.source_document_schema import SourceDocument
@@ -21,6 +22,7 @@ class RetrievalService:
         # Increase for long-form section queries (e.g. methods/results),
         # decrease for lightweight deployments or smaller LLM context windows.
         self.max_chunks_per_article = max_chunks_per_article
+        self.reranker = Reranker()
 
     def retrieve(self, request: QueryRequest, top_k: int = 5, min_score: float = 0.0) -> QueryResponse:
         """
@@ -44,8 +46,10 @@ class RetrievalService:
             search_results = self.vector_db.search_vectors(
                 collection_name=self.collection_name,
                 query_vector=query_embedding,
-                top_k=top_k * 3,
+                top_k=top_k * 4,  # fetch 20 results to allow for filtering and deduplication
             )
+
+            # print(f"len of search results: {len(search_results)}")
 
             # Apply minimum similarity score filter
             if min_score > 0.0:
@@ -105,10 +109,14 @@ class RetrievalService:
                     )
                 )
 
-            # Sort by best score and cap to the requested top_k unique articles
-            llm_docs = sorted(llm_docs, key=lambda d: d.score, reverse=True)[:top_k]
-            print(f"Contents of retrieved document: \n {[doc.combined_text[:200] for doc in llm_docs]}")
-            print(f"")
+
+            print(f"Number of unique articles retrieved before reranking: {len(llm_docs)}")
+
+            # Sort by best score and cap to the requested top_k = 5 unique articles
+            # rerank the retrieved documents using the cross-encoder model
+            llm_docs = self.reranker.rerank(request.query, llm_docs)[:top_k]
+            print(f"Number of unique articles retrieved after reranking: {len(llm_docs)}")
+            print(f"Contents of retrieved documents after reranking: \n {[doc.combined_text[:200] for doc in llm_docs]}")
 
             # Converting the RetrievedDocument list to SourceDocument with score for the user response
             user_docs = [

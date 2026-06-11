@@ -1,60 +1,49 @@
-# syntax=docker/dockerfile:1.4
 # ── build stage ───────────────────────────────────────────────────────────────
-# Keeps compilers, Poetry, and wheel caches out of the final image.
 FROM python:3.11-slim AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Build-time system deps (C extensions for spacy, lxml, Pillow, etc.)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    build-essential \
-    libpq-dev \
-    curl && \
+    build-essential libpq-dev curl && \
     rm -rf /var/lib/apt/lists/*
 
-# Install Poetry
 RUN curl -sSL https://install.python-poetry.org | python3 -
 ENV PATH="/root/.local/bin:$PATH"
 
 WORKDIR /app
 
-# Copy dependency manifests first — Docker layer cache means this expensive
-# install step is only re-run when pyproject.toml or poetry.lock actually change.
 COPY pyproject.toml poetry.lock* /app/
 
-# --only main   : skip dev deps (pytest, pytest-cov, pytest-asyncio, etc.)
-# --no-root     : don't try to install the project itself as a package
-# --mount=type=cache : reuse downloaded wheels between builds so only changed
-#                     packages are re-downloaded (biggest single speedup)
+# Layer 1: install Python packages (cached unless poetry.lock changes)
 RUN --mount=type=cache,target=/root/.cache/pip \
     --mount=type=cache,target=/root/.local/share/pypoetry/cache \
     poetry config virtualenvs.create false && \
     poetry install --only main --no-interaction --no-ansi --no-root
 
+# Layer 2: download model separately (cached unless Layer 1 changes)
+RUN python -c "from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')"
+
 # ── runtime stage ─────────────────────────────────────────────────────────────
-# Clean image: no Poetry, no compilers, no build caches.
 FROM python:3.11-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# Runtime-only system libs (libpq for SQLAlchemy, curl for healthcheck)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    libpq5 \
-    curl && \
+    libpq5 curl && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy installed packages from builder — no compilers needed at runtime
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
+# Copy the HuggingFace model cache from builder
+COPY --from=builder /root/.cache/huggingface /root/.cache/huggingface
 
-# Copy application code
 COPY app /app/app
 
 EXPOSE 8000
