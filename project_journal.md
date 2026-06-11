@@ -435,7 +435,13 @@ llama3.2:3b, qwen2.5:3b (1.9GB), gemma3:1b(1.2GB), qwen3:3b (2.1GB), phi4-mini:3
 
 ## 2026-06-06
 
--
+- Updated the `retrieval_service.py` to include a re-ranking step after retrieving the relevant chunks from the vector database. Initially, I was just retrieving the top k chunks based on their similarity scores from Qdrant and passing them to the LLM for generating responses. However, this approach can lead to suboptimal results as it does not take into account the relevance of the sections of the paper to the query. For example, if the query is about the results of a clinical study, then chunks from the "Results" section should be ranked higher than chunks from the "Methods" section, even if their similarity scores are similar.
+- Implemented a `Reranker` class that uses a cross-encoder model to re-rank the retrieved chunks based on their relevance to the query, taking into account the content of the chunks and their section information. I am using `cross-encoder/ms-marco-MiniLM-L-6-v2` model for re-ranking which is a smaller and efficient model suitable. The re-ranking step will help ensure that the most relevant chunks are prioritized in the context provided to the LLM, leading to more accurate and informed responses.
+
+---
+
+MUST DO:
+- Reranking the retrieved documents based on the relevance of the sections to the query. For example, if the query is about the results of a clinical study, then chunks from the "Results" section should be ranked higher than chunks from the "Methods" section. This can be done by assigning different weights to different sections during the retrieval process or by using a more sophisticated re-ranking model that takes into account the section information and the content of the chunks.
 
 TODO:
 - A way to ask a list of questions to all the papers and get the answers in a structured format
