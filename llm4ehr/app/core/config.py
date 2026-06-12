@@ -1,8 +1,12 @@
-from dotenv import load_dotenv
 import os
 
-# os.environ["TRANSFORMERS_OFFLINE"] = "1"
-# os.environ["HF_DATASETS_OFFLINE"] = "1"
+# Set offline mode IMMEDIATELY at module level
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+os.environ["HF_DATASETS_OFFLINE"] = "1"
+os.environ["HF_HUB_OFFLINE"] = "1"  # Add this for huggingface_hub
+
+
+from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()

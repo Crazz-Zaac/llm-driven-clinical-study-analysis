@@ -4,26 +4,26 @@ FROM python:3.11-slim AS builder
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+ENV PIP_DEFAULT_TIMEOUT=300
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     build-essential libpq-dev curl && \
     rm -rf /var/lib/apt/lists/*
 
-RUN curl -sSL https://install.python-poetry.org | python3 -
-ENV PATH="/root/.local/bin:$PATH"
-
 WORKDIR /app
 
-COPY pyproject.toml poetry.lock* /app/
+# Copy requirements (export from poetry first or create requirements.txt)
+# If you don't have requirements.txt, generate it:
+# poetry export -f requirements.txt --output requirements.txt --without-hashes
 
-# Layer 1: install Python packages (cached unless poetry.lock changes)
+COPY requirements.txt /app/
+
+# Install Python packages with pip and retry on failure
 RUN --mount=type=cache,target=/root/.cache/pip \
-    --mount=type=cache,target=/root/.local/share/pypoetry/cache \
-    poetry config virtualenvs.create false && \
-    poetry install --only main --no-interaction --no-ansi --no-root
+    pip install --retries=5 --timeout=300 -r requirements.txt
 
-# Layer 2: download model separately (cached unless Layer 1 changes)
+# Download model
 RUN python -c "from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')"
 
 # ── runtime stage ─────────────────────────────────────────────────────────────
@@ -31,6 +31,9 @@ FROM python:3.11-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+ENV TRANSFORMERS_OFFLINE=1
+ENV HF_DATASETS_OFFLINE=1
+ENV HF_HUB_OFFLINE=1
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -41,7 +44,6 @@ WORKDIR /app
 
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
-# Copy the HuggingFace model cache from builder
 COPY --from=builder /root/.cache/huggingface /root/.cache/huggingface
 
 COPY app /app/app

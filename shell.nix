@@ -1,9 +1,15 @@
 { pkgs ? import <nixpkgs> {} }:
 
+let
+  # Define a custom Poetry package with the export plugin
+  poetryWithPlugins = pkgs.poetry.withPlugins (p: [
+    p.poetry-plugin-export
+  ]);
+in
 pkgs.mkShell {
   buildInputs = with pkgs; [
     python311
-    poetry
+    poetryWithPlugins  # Use the custom package instead of standard poetry
     stdenv.cc.cc.lib
     zlib
   ];
@@ -20,4 +26,4 @@ pkgs.mkShell {
     # Auto-activate
     source .venv/bin/activate
   '';
-}
+}   

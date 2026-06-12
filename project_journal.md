@@ -3,6 +3,7 @@
 - Activating environment (on hpc): `source $WORK/poetry-env/bin/activate`
 - Generating a hex code (as secret key): `openssl rand -hex 32`
 - Building docker image from root folder (llm4ehr): `docker build -f docker/Dockerfile -t llm4ehr-app .`
+- Generating **requirements.txt** from poetry: `poetry export -f requirements.txt --output requirements.txt --without-hashes`
 
 ---
 
@@ -437,8 +438,24 @@ llama3.2:3b, qwen2.5:3b (1.9GB), gemma3:1b(1.2GB), qwen3:3b (2.1GB), phi4-mini:3
 
 - Updated the `retrieval_service.py` to include a re-ranking step after retrieving the relevant chunks from the vector database. Initially, I was just retrieving the top k chunks based on their similarity scores from Qdrant and passing them to the LLM for generating responses. However, this approach can lead to suboptimal results as it does not take into account the relevance of the sections of the paper to the query. For example, if the query is about the results of a clinical study, then chunks from the "Results" section should be ranked higher than chunks from the "Methods" section, even if their similarity scores are similar.
 - Implemented a `Reranker` class that uses a cross-encoder model to re-rank the retrieved chunks based on their relevance to the query, taking into account the content of the chunks and their section information. I am using `cross-encoder/ms-marco-MiniLM-L-6-v2` model for re-ranking which is a smaller and efficient model suitable. The re-ranking step will help ensure that the most relevant chunks are prioritized in the context provided to the LLM, leading to more accurate and informed responses.
+- Even with the implementation of the re-ranking, the model isn't able to answer the questions like:
+  - Q: What ml models were trained according to the paper'Development and validation of machine learning models for predicting extubation failure in patients undergoing cardiac surgery: a retrospective study'?
+  - A: The XGBoost algorithm, logistic regression (LR), and random forest (RF) models were trained.
+- This response is correct but for the following question:
+  - Q: Give me the final performance metrics scroe of all the trained models according to the paper'Development and validation of machine learning models for predicting extubation failure in patients undergoing cardiac surgery: a retrospective study'?
+  - A: According to 'Development and validation of machine learning models for predicting extubation failure in patients undergoing cardiac surgery: a retrospective study' (Scientific Reports), the XGBoost algorithm had the highest performance metrics with an AUC of 0.793, Mean Precision of 0.700, and Brier Score of 0.150
+- Here, the model is only able to retrieve the performance metrics for the XGBoost model but not for LR and RF. 
+- Another thing I noticed is that the retrieved chunks and re-ranked chunks are almost always from the `Abstract`, `Results`, `Discussions` and `Conclusion` sections but not from the `Methods` section. This is because the `Methods` section contains more technical details and specific terminologies which might not be as semantically similar to the query as the other sections, even though it might contain relevant information about the trained models.
+- Also, right now I'm only fetching 3 `max_chunks_per_article`. This might not be enough to capture all the relevant information from the `Methods` section which can lead to missing out on important details about the trained models and their performance metrics. I might need to increase this number to ensure that I'm capturing enough information from the `Methods` section as well, which can help the model provide more comprehensive answers to questions about the trained models and their performance metrics.
 
 ---
+
+## 2026-06-12
+- 
+
+
+---
+
 
 MUST DO:
 - Reranking the retrieved documents based on the relevance of the sections to the query. For example, if the query is about the results of a clinical study, then chunks from the "Results" section should be ranked higher than chunks from the "Methods" section. This can be done by assigning different weights to different sections during the retrieval process or by using a more sophisticated re-ranking model that takes into account the section information and the content of the chunks.
