@@ -1,20 +1,15 @@
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as rest
-
 from app.core.config import settings
 
 
 class QdrantVectorDB:
-    """Class to manage interactions with Qdrant vector database"""
-
     def __init__(self):
-        """Initialize Qdrant client using settings from environment variables"""
         self.client = QdrantClient(
             url=settings.QDRANT_URL, api_key=settings.QDRANT_API_KEY
         )
 
     def create_collection(self, collection_name: str, vector_size: int):
-        """Create a new collection in Qdrant if it doesn't exist."""
         if not self.client.collection_exists(collection_name):
             self.client.create_collection(
                 collection_name=collection_name,
@@ -23,35 +18,63 @@ class QdrantVectorDB:
                 ),
             )
 
+    def delete_collection(self, collection_name: str):
+        if self.client.collection_exists(collection_name):
+            self.client.delete_collection(collection_name=collection_name)
+
     def upsert_vectors(self, collection_name: str, vectors: list):
-        """Upsert a list of vectors into the specified collection"""
         self.client.upsert(collection_name=collection_name, points=vectors)
 
     def search_vectors(self, collection_name: str, query_vector: list, top_k: int = 5):
-        """Search for similar vectors in the specified collection"""
         response = self.client.query_points(
             collection_name=collection_name,
             query=query_vector,
             limit=top_k,
             with_payload=True,
-            with_vectors=False, # we don't need to return the vectors themselves, just the payload and scores
+            with_vectors=False,
         )
-        # returning the points with payload for further processing in the retrieval service
         return response.points
 
-    def ensure_collection(self, collection_name: str, vector_size: int):
-        """Alias for create_collection — creates only if it doesn't exist."""
-        self.create_collection(collection_name, vector_size)
+    def search_vectors_filtered(
+        self, collection_name: str, query_vector: list, article_id: str, top_k: int = 15
+    ):
+        """Search within a specific article only."""
+        response = self.client.query_points(
+            collection_name=collection_name,
+            query=query_vector,
+            query_filter=rest.Filter(
+                must=[
+                    rest.FieldCondition(
+                        key="article_id", match=rest.MatchValue(value=article_id)
+                    )
+                ]
+            ),
+            limit=top_k,
+            with_payload=True,
+            with_vectors=False,
+        )
+        return response.points
 
-    def delete_collection(self, collection_name: str):
-        """Delete an entire collection from Qdrant"""
-        if self.client.collection_exists(collection_name):
-            self.client.delete_collection(collection_name=collection_name)
+    def find_article_id_by_title(
+        self, collection_name: str, title_fragment: str
+    ) -> str | None:
+        """Find article_id by partial title match."""
+        results, _ = self.client.scroll(
+            collection_name=collection_name,
+            scroll_filter=rest.Filter(
+                must=[
+                    rest.FieldCondition(
+                        key="title", match=rest.MatchText(text=title_fragment)
+                    )
+                ]
+            ),
+            limit=1,
+            with_payload=True,
+            with_vectors=False,
+        )
+        return results[0].payload.get("article_id") if results else None
 
-    def delete_by_article_ids(
-        self, collection_name: str, article_ids: list[str]
-    ) -> None:
-        """Delete points matching article IDs from a collection"""
+    def delete_by_article_ids(self, collection_name: str, article_ids: list[str]):
         if not article_ids:
             return
         self.client.delete(
@@ -59,8 +82,7 @@ class QdrantVectorDB:
             points_selector=rest.Filter(
                 must=[
                     rest.FieldCondition(
-                        key="article_id",
-                        match=rest.MatchAny(any=article_ids),
+                        key="article_id", match=rest.MatchAny(any=article_ids)
                     )
                 ]
             ),

@@ -21,7 +21,7 @@ class IndexingService:
         self.collection_name = settings.QDRANT_COLLECTION_NAME
 
     def index_documents(self, documents: list[dict[str, Any]]) -> dict[str, Any]:
-        self.vector_db.ensure_collection(
+        self.vector_db.create_collection(
             self.collection_name, vector_size=self.embedder._embedding_dimension
         )
         if self._stop_requested:

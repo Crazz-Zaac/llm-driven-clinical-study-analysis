@@ -437,12 +437,12 @@ llama3.2:3b, qwen2.5:3b (1.9GB), gemma3:1b(1.2GB), qwen3:3b (2.1GB), phi4-mini:3
 ## 2026-06-06
 
 - Updated the `retrieval_service.py` to include a re-ranking step after retrieving the relevant chunks from the vector database. Initially, I was just retrieving the top k chunks based on their similarity scores from Qdrant and passing them to the LLM for generating responses. However, this approach can lead to suboptimal results as it does not take into account the relevance of the sections of the paper to the query. For example, if the query is about the results of a clinical study, then chunks from the "Results" section should be ranked higher than chunks from the "Methods" section, even if their similarity scores are similar.
-- Implemented a `Reranker` class that uses a cross-encoder model to re-rank the retrieved chunks based on their relevance to the query, taking into account the content of the chunks and their section information. I am using `cross-encoder/ms-marco-MiniLM-L-6-v2` model for re-ranking which is a smaller and efficient model suitable. The re-ranking step will help ensure that the most relevant chunks are prioritized in the context provided to the LLM, leading to more accurate and informed responses.
+- Implemented a `Reranker` class that uses a `cross-encoder/ms-marco-MiniLM-L-6-v2` model to re-rank the retrieved chunks based on their relevance to the query, taking into account the content of the chunks and their section information. I am using `cross-encoder/ms-marco-MiniLM-L-6-v2` model for re-ranking which is a smaller and efficient model suitable. The re-ranking step will help ensure that the most relevant chunks are prioritized in the context provided to the LLM, leading to more accurate and informed responses.
 - Even with the implementation of the re-ranking, the model isn't able to answer the questions like:
   - Q: What ml models were trained according to the paper'Development and validation of machine learning models for predicting extubation failure in patients undergoing cardiac surgery: a retrospective study'?
   - A: The XGBoost algorithm, logistic regression (LR), and random forest (RF) models were trained.
 - This response is correct but for the following question:
-  - Q: Give me the final performance metrics scroe of all the trained models according to the paper'Development and validation of machine learning models for predicting extubation failure in patients undergoing cardiac surgery: a retrospective study'?
+  - Q: Give me the final performance metric scores of all the trained models according to the paper'Development and validation of machine learning models for predicting extubation failure in patients undergoing cardiac surgery: a retrospective study'?
   - A: According to 'Development and validation of machine learning models for predicting extubation failure in patients undergoing cardiac surgery: a retrospective study' (Scientific Reports), the XGBoost algorithm had the highest performance metrics with an AUC of 0.793, Mean Precision of 0.700, and Brier Score of 0.150
 - Here, the model is only able to retrieve the performance metrics for the XGBoost model but not for LR and RF. 
 - Another thing I noticed is that the retrieved chunks and re-ranked chunks are almost always from the `Abstract`, `Results`, `Discussions` and `Conclusion` sections but not from the `Methods` section. This is because the `Methods` section contains more technical details and specific terminologies which might not be as semantically similar to the query as the other sections, even though it might contain relevant information about the trained models.
@@ -451,8 +451,16 @@ llama3.2:3b, qwen2.5:3b (1.9GB), gemma3:1b(1.2GB), qwen3:3b (2.1GB), phi4-mini:3
 ---
 
 ## 2026-06-12
-- 
-
+- Initially I was only retrieving 20 vectors from the vector database for each query which might not be enough to capture all the relevant information, especially for longer papers with more sections and details. Now I have updated the retrieval service to retrieve up to 50 vectors per query.
+- This improved the reponse of the previous queries correctly.
+  - Q: Give me the final performance metric scores of all the trained models according to the paper'Development and validation of machine learning models for predicting extubation failure in patients undergoing cardiac surgery: a retrospective study'?
+  - A: According to [Development and validation of machine learning models for predicting extubation failure in patients undergoing cardiac surgery: a retrospective study], the final performance metric scores of all the trained models are as follows:
+    - XGBoost: AUC 0.793, Mean Precision 0.700, Brier Score 0.150
+    - Logistic regression: AUC 0.766, Mean Precision 0.553, Brier Score 0.173
+    - Random forest: AUC 0.791, Mean Precision 0.510, Brier Score 0.181
+- I also thought that only returning top 5 re-ranked chunks might not be enough for the LLM to generate a comprehensive response, especially for complex queries that require information from multiple sections of the paper but as a downside, the inference time will increase as the LLM will have to process more chunks of information. I might need to experiment with different numbers of re-ranked chunks to find the right balance between response quality and inference time.
+- To make the search faster for queries that explicitly mention the paper names, I think it would be beneficial to implement a more structured retrieval approach where if the query mentions a specific paper, we can first filter the chunks based on the article_id or title before applying the re-ranking. This way, we can ensure that we are only retrieving and re-ranking chunks from the relevant paper, which can lead to faster retrieval and more accurate responses for queries that are focused on specific papers.
+- Updated the `retrieval_service.py` to include a check for paper title in the query. It extracts the title fragment from the query, search the vector database for the article_id based on the title fragment, and then retrieves chunks that are only from that specific article for re-ranking. This structured retrieval approach can help improve the relevance of the retrieved chunks and speed up the retrieval process for queries that mention specific paper titles.
 
 ---
 
