@@ -57,14 +57,14 @@ class RetrievalService:
         try:
             logger.info(f"Retrieving documents for query: {request.query[:100]}...")
 
+            query_embedding = self.embedder.embed(request.query, show_timing=False)
             title_fragment = self._extract_paper_title(request.query)
+            search_results = None
             if title_fragment:
                 logger.info(f"Extracted title fragment from query: '{title_fragment}'")
                 article_id = self.vector_db.find_article_id_by_title(
                     self.collection_name, title_fragment
                 )
-                # Embed the query
-                query_embedding = self.embedder.embed(request.query, show_timing=False)
 
                 if article_id:
                     logger.info(
@@ -90,6 +90,13 @@ class RetrievalService:
                         * 10,  # fetch top_k * 10 results to allow for filtering and deduplication
                     )
 
+            if search_results is None:
+                search_results = self.vector_db.search_vectors(
+                    collection_name=self.collection_name,
+                    query_vector=query_embedding,
+                    top_k=self.top_k * 10,  # fetch extra for reranking
+                )
+            
             print(f"len of search results: {len(search_results)}")
 
             # Apply minimum similarity score filter

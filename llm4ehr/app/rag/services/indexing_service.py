@@ -44,7 +44,11 @@ class IndexingService:
                     continue
 
                 chunks = self.chunker.split_text(section_text)
-                chunk_texts = [chunk.page_content for chunk in chunks]
+                # chunk_texts = [chunk.page_content for chunk in chunks]
+                chunk_texts = [
+                    f"Title: {doc['title']}\nSection: {section_name}\n\nContent:\n{chunk.page_content}"
+                    for chunk in chunks
+                ]
                 if not chunk_texts:
                     continue
 
