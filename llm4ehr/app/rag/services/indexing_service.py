@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 from typing import Any
 from loguru import logger
+from qdrant_client.models import PointStruct, SparseVector
 
 from app.rag.embeddings.embedder import TextEmbedder
 from app.db.qdrant_client import QdrantVectorDB
@@ -52,20 +53,26 @@ class IndexingService:
                 if not chunk_texts:
                     continue
 
-                embeddings = self.embedder.embed(chunk_texts, show_timing=False)
+                embeddings = self.embedder.embed_dense(chunk_texts, show_timing=False)
+                sparse_embeddings = self.embedder.embed_sparse_batch(chunk_texts)
 
-                for i, (chunk_text, embedding) in enumerate(
-                    zip(chunk_texts, embeddings)
+                for i, (chunk_text, embedding, sparse) in enumerate(
+                    zip(chunk_texts, embeddings, sparse_embeddings)
                 ):
                     if self._stop_requested:
                         break
                     points.append(
-                        {
-                            "id": self._make_point_id(
+                        PointStruct(
+                            id=self._make_point_id(
                                 f"{doc['article_id']}_{section_name}_{i}"
                             ),
-                            "vector": embedding,
-                            "payload": {
+                            vector={
+                                "dense": embedding,
+                                "sparse": SparseVector(
+                                    indices=sparse["indices"], values=sparse["values"]
+                                ),
+                            },
+                            payload={
                                 "article_id": doc.get("article_id", ""),
                                 "url": doc.get("url", ""),
                                 "title": doc.get("title", ""),
@@ -74,7 +81,7 @@ class IndexingService:
                                 "combined_text": chunk_text,
                                 "chunk_index": i,
                             },
-                        }
+                        )
                     )
 
         if points:

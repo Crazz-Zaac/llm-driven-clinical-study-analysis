@@ -1,9 +1,14 @@
 import time
 import logging
 import requests
+from pathlib import Path
+from fastembed import SparseTextEmbedding
 
 from app.core.config import settings
-from app.db.activate_model import get_active_embedding_model, get_active_embedding_dimension
+from app.db.activate_model import (
+    get_active_embedding_model,
+    get_active_embedding_dimension,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -13,9 +18,16 @@ class TextEmbedder:
         self.model_name = get_active_embedding_model()  # resolved at instantiation
         self.show_progress = show_progress
         self.ollama_url = settings.OLLAMA_URL
-        self._embedding_dimension: int | None = get_active_embedding_dimension()  # eager load
+        self._embedding_dimension: int | None = (
+            get_active_embedding_dimension()
+        )  # eager load
 
-    def embed(self, text: str | list[str], show_timing: bool = True) -> list:
+        self.sparse_embedder = SparseTextEmbedding(
+            model_name="Qdrant/bm25",
+            cache_dir=Path("/tmp/fastembed_cache"),
+        )  # for sparse embeddings
+
+    def embed_dense(self, text: str | list[str], show_timing: bool = True) -> list:
         start_time = time.time()
 
         is_batch = isinstance(text, list)
@@ -44,3 +56,20 @@ class TextEmbedder:
             )
 
         return embeddings if is_batch else embeddings[0]
+
+    def embed_sparse(self, text: str) -> dict[str, list[float]]:
+        """Generate sparse embedding using BM25-based FastEmbed."""
+        embeddings = next(self.sparse_embedder.embed([text]))
+        return {
+            "indices": embeddings.indices.tolist(),
+            "values": embeddings.values.tolist(),
+        }
+
+    # this method is used only for indexing
+    def embed_sparse_batch(self, texts: list[str]) -> list[dict[str, list[float]]]:
+        """Generate sparse embeddings for a batch of texts in one pass."""
+        results = self.sparse_embedder.embed(texts)
+        return [
+            {"indices": r.indices.tolist(), "values": r.values.tolist()}
+            for r in results
+        ]

@@ -57,7 +57,9 @@ class RetrievalService:
         try:
             logger.info(f"Retrieving documents for query: {request.query[:100]}...")
 
-            query_embedding = self.embedder.embed(request.query, show_timing=False)
+            dens_vec = self.embedder.embed_dense(request.query, show_timing=False)
+            sparse_vec = self.embedder.embed_sparse(request.query)
+
             title_fragment = self._extract_paper_title(request.query)
             search_results = None
             if title_fragment:
@@ -71,11 +73,18 @@ class RetrievalService:
                         f"Found article ID '{article_id}' for title fragment '{title_fragment}'"
                     )
                     # Perform a filtered search within the identified article
-                    search_results = self.vector_db.search_vectors_filtered(
+                    # search_results = self.vector_db.search_vectors_filtered(
+                    #     collection_name=self.collection_name,
+                    #     query_vector=dens_vec,
+                    #     article_id=article_id,
+                    #     top_k=self.top_k * 10,  # fetch extra for reranking
+                    # )
+                    search_results = self.vector_db.hybrid_search_vectors_filtered(
                         collection_name=self.collection_name,
-                        query_vector=query_embedding,
+                        dense_vector=dens_vec,
+                        sparse_vector=sparse_vec,
                         article_id=article_id,
-                        top_k=self.top_k * 10,  # fetch extra for reranking
+                        top_k=self.top_k * 10,
                     )
                 else:
                     logger.warning(
@@ -83,25 +92,29 @@ class RetrievalService:
                     )
 
                     # Fetch extra candidates so per-article deduplication still yields top_k articles
-                    search_results = self.vector_db.search_vectors(
+                    # search_results = self.vector_db.dense_search_vectors(
+                    #     collection_name=self.collection_name,
+                    #     query_vector=dens_vec,
+                    #     top_k=self.top_k
+                    #     * 10,  # fetch top_k * 10 results to allow for filtering and deduplication
+                    # )
+                    search_results = self.vector_db.hybrid_search_vectors_filtered(
                         collection_name=self.collection_name,
-                        query_vector=query_embedding,
-                        top_k=self.top_k
-                        * 10,  # fetch top_k * 10 results to allow for filtering and deduplication
+                        dense_vector=dens_vec,
+                        sparse_vector=sparse_vec,
+                        article_id=article_id,
+                        top_k=self.top_k * 10,
                     )
 
             if search_results is None:
-                search_results = self.vector_db.search_vectors(
+                search_results = self.vector_db.hybrid_search_vectors(
                     collection_name=self.collection_name,
-                    query_vector=query_embedding,
-                    top_k=self.top_k * 10,  # fetch extra for reranking
+                    dense_vector=dens_vec,
+                    sparse_vector=sparse_vec,
+                    top_k=self.top_k * 10,
                 )
-            
-            print(f"len of search results: {len(search_results)}")
 
-            # Apply minimum similarity score filter
-            if min_score > 0.0:
-                search_results = [r for r in search_results if r.score >= min_score]
+            print(f"len of search results: {len(search_results)}")
 
             # Group chunks by article
             chunks_per_article: dict = defaultdict(list)

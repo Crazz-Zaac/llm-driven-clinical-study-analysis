@@ -4,7 +4,9 @@ FROM python:3.11-slim AS builder
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
-ENV PIP_DEFAULT_TIMEOUT=300
+ENV PIP_DEFAULT_TIMEOUT=1000
+ENV POETRY_REQUESTS_TIMEOUT=1000
+ENV POETRY_INSTALLER_MAX_WORKERS=4
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -13,20 +15,18 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-# Copy requirements (export from poetry first or create requirements.txt)
-# If you don't have requirements.txt, generate it:
-# poetry export -f requirements.txt --output requirements.txt --without-hashes
+COPY pyproject.toml poetry.lock ./
+RUN pip install poetry && \
+    poetry config virtualenvs.create false && \
+    poetry install --no-root --no-interaction --no-ansi
 
-COPY requirements.txt /app/
-
-# Install Python packages with pip and retry on failure
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --retries=5 --timeout=300 -r requirements.txt
-
-# Download model
+# Download cross-encoder reranker model
 RUN python -c "from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')"
 
-# ── runtime stage ─────────────────────────────────────────────────────────────
+# Download BM25 sparse embedding model (fastembed uses its own cache dir, NOT the HF cache)
+RUN python -c "from fastembed import SparseTextEmbedding; SparseTextEmbedding(model_name='Qdrant/bm25', cache_dir='/tmp/fastembed_cache')"
+
+# runtime stage
 FROM python:3.11-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -45,6 +45,7 @@ WORKDIR /app
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --from=builder /root/.cache/huggingface /root/.cache/huggingface
+COPY --from=builder /tmp/fastembed_cache /tmp/fastembed_cache
 
 COPY app /app/app
 

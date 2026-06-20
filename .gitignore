@@ -226,3 +226,6 @@ node_modules
 
 *.sif
 *.def
+
+
+extra_materials/research.py
