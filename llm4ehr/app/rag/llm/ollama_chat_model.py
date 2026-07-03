@@ -25,6 +25,11 @@ class OllamaChatModel:
                     {"role": msg.role, "content": msg.content}
                     for msg in request.messages
                 ],
+                "options": {
+                    "temperature": request.temperature,
+                    "num_predict": request.max_tokens,
+                    "top_p": request.top_p,
+                },
                 "stream": False,
             }
 

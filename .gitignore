@@ -229,3 +229,5 @@ node_modules
 
 
 extra_materials/research.py
+extra_materials/misc
+extra_materials/thesis

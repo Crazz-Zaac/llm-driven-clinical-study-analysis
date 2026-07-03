@@ -1,5 +1,6 @@
 import logging
 from collections import defaultdict
+import math
 import re
 
 from app.rag.embeddings.embedder import TextEmbedder
@@ -15,7 +16,7 @@ logger = logging.getLogger(__name__)
 class RetrievalService:
     """Service for retrieving relevant documents from the vector database."""
 
-    def __init__(self, max_chunks_per_article: int = 3):
+    def __init__(self, max_chunks_per_article: int = 5):
         self.embedder = TextEmbedder(show_progress=False)
         self.vector_db = QdrantVectorDB()
         self.collection_name = settings.QDRANT_COLLECTION_NAME
@@ -27,6 +28,14 @@ class RetrievalService:
         self.top_k = (
             5  # Number of unique articles to return after retrieval and reranking
         )
+
+    # this function is specifically used to clean up the section headers from the
+    # combined text of the retrieved documents to prepare context for LLM evaluation
+    # removes section headers like [ABSTRACT], [METHODS], [RESULTS], etc. and collapses extra blank lines
+    def _strip_section_tags(self, text: str) -> str:
+        text = re.sub(r"\[[A-Z\s]+\]\n?", "", text)
+        text = re.sub(r"\n{3,}", "\n\n", text)  # collapse extra blank lines
+        return text.strip()
 
     def _extract_paper_title(self, query: str) -> str | None:
         """Extract quoted or 'in the paper X' style title from query."""
@@ -42,7 +51,14 @@ class RetrievalService:
             return match.group(1).strip()
         return None
 
-    def retrieve(self, request: QueryRequest, min_score: float = 0.0) -> QueryResponse:
+    def _reranker_score_to_relevance(self, score: float) -> float:
+        """Map cross-encoder logits to a bounded user-facing relevance score."""
+        try:
+            return 1 / (1 + math.exp(-score))
+        except OverflowError:
+            return 0.0 if score < 0 else 1.0
+
+    def retrieve(self, request: QueryRequest) -> QueryResponse:
         """
         Retrieve relevant documents for a query.
 
@@ -88,23 +104,9 @@ class RetrievalService:
                     )
                 else:
                     logger.warning(
-                        f"No article title fragment found in the query: '{title_fragment}'"
+                        f"No article found for title fragment: '{title_fragment}', falling back to unfiltered search"
                     )
-
-                    # Fetch extra candidates so per-article deduplication still yields top_k articles
-                    # search_results = self.vector_db.dense_search_vectors(
-                    #     collection_name=self.collection_name,
-                    #     query_vector=dens_vec,
-                    #     top_k=self.top_k
-                    #     * 10,  # fetch top_k * 10 results to allow for filtering and deduplication
-                    # )
-                    search_results = self.vector_db.hybrid_search_vectors_filtered(
-                        collection_name=self.collection_name,
-                        dense_vector=dens_vec,
-                        sparse_vector=sparse_vec,
-                        article_id=article_id,
-                        top_k=self.top_k * 10,
-                    )
+                    search_results = None
 
             if search_results is None:
                 search_results = self.vector_db.hybrid_search_vectors(
@@ -184,7 +186,7 @@ class RetrievalService:
                 f"Number of unique articles retrieved after reranking: {len(llm_docs)}"
             )
             print(
-                f"Contents of retrieved documents after reranking: \n {[doc.combined_text[:200] for doc in llm_docs]}"
+                f"Contents of retrieved documents after reranking: \n {[doc.combined_text for doc in llm_docs]}"
             )
 
             # Converting the RetrievedDocument list to SourceDocument with score for the user response
@@ -193,13 +195,18 @@ class RetrievalService:
                     article_id=doc.article_id,
                     title=doc.title,
                     url=doc.url,
-                    score=round(doc.score, 4),
+                    score=round(self._reranker_score_to_relevance(doc.score), 4),
                 )
                 for doc in llm_docs
             ]
             # Return documents for the LLM to use
             return QueryResponse(
-                response="", llm_docs=llm_docs, source_documents=user_docs
+                response="",
+                contexts=[
+                    self._strip_section_tags(doc.combined_text) for doc in llm_docs
+                ],  # Provide the combined text of the retrieved documents as context only for the LLM evaluation
+                llm_docs=llm_docs,
+                source_documents=user_docs,
             )
         except Exception as e:
             logger.error(f"Error processing query: {str(e)}")

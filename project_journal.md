@@ -4,12 +4,12 @@
 - Generating a hex code (as secret key): `openssl rand -hex 32`
 - Building docker image from root folder (llm4ehr): `docker build -f docker/Dockerfile -t llm4ehr-app .`
 - Generating **requirements.txt** from poetry: `poetry export -f requirements.txt --output requirements.txt --without-hashes`
-
+- Add package to poetry only for evaluation (for example): `poetry add -G evaluation streamlit`
 ---
 
 # Project History
 
-## 2026-02-25
+## 2026-02-25: Basic project setup and initial data extraction
 
 - project setup
   - Installed necessary packages like: `langchain, beautifulsoup, pyeuropepmc, pdfminer`
@@ -66,7 +66,7 @@
     ```
 ---
 
-## 2026-03-01
+## 2026-03-01: PDF Scraping and Section Extraction
 
 - The issue was that `pdfminer` package just reads data _left-to-right, top-to-bottom_. It was totally ignoring the layout of the paper. For two-column layout papers, it was producing garbled results. 
   - Solution: 
@@ -75,7 +75,7 @@
 
 ---
 
-## 2026-03-16
+## 2026-03-16: Paper Scraping and Section Extraction
 
 - Created `scrape_literatures.py`
   - `scrape_articles()`: queries nature's journal and returns search results containing paper's url
@@ -92,13 +92,13 @@
 
 ---
 
-## 2026-03-22
+## 2026-03-22: Project Restructuring
 
 - Restructured the project for dockerizing into services
 
 ---
 
-## 2026-03-23
+## 2026-03-23: HPC Setup and Initial Embedding Models
 
 - Setting up project in HPC 
   - creating virtual environment
@@ -118,7 +118,7 @@
 
 --- 
 
-## 2026-03-29 (Minimal RAG pipeline)
+## 2026-03-29: Minimal RAG pipeline
 ### Indexing Phase (First Run)
 ```
 📄 Documents                             → Load raw data (PDFs, text, etc.)
@@ -185,12 +185,11 @@
 
 ---
 
-## 2026-03-30
+## 2026-03-30: Project Restructuring
 
 - Restructured the project
   - removed `ingestion/ingestion.py` and instead created `services/ingestion_service.py`
-  - removed `retrieval/query.py` and instead created `services/retrieval_service.p`
-
+  - removed `retrieval/query.py` and instead created `services/retrieval_service.py`
 - Created tests for testing each rag components
 ```
 tests/
@@ -229,7 +228,7 @@ pytest tests/test_rag_pipeline.py::TestRAGPipeline::test_pipeline_run_with_docum
 
 ---
 
-## 2026-04-03
+## 2026-04-03: Docker Setup and Configuration
 
 - Updated `docker-compose.yml` 
 - Updated `Dockerfile`
@@ -239,7 +238,7 @@ pytest tests/test_rag_pipeline.py::TestRAGPipeline::test_pipeline_run_with_docum
 
 ---
 
-## 2026-04-04
+## 2026-04-04: Paper Scraping and Indexing
 
 - Created schema, services and edpoint for scraping paper from nature journal
   - Created `schema/scrape_schema.py`
@@ -249,7 +248,7 @@ pytest tests/test_rag_pipeline.py::TestRAGPipeline::test_pipeline_run_with_docum
 
 ---
 
-## 2026-04-05
+## 2026-04-05: Frontend Setup and Integration
 
 - created frontend container
 - generated frontend in next js using [v0](v0.app)
@@ -262,7 +261,7 @@ pytest tests/test_rag_pipeline.py::TestRAGPipeline::test_pipeline_run_with_docum
   
 ---
 
-## 2026-04-06
+## 2026-04-06: Singularity Containerization for HPC
 
 - Created `.sif` and `.def` files for singularity containerization
   - `apptainer build backend.sif backend.def`
@@ -275,7 +274,7 @@ pytest tests/test_rag_pipeline.py::TestRAGPipeline::test_pipeline_run_with_docum
 
 ---
 
-## 2026-04-30
+## 2026-04-30: Embedding and Retrieval Tests
 
 - Adjusted the `tests/embedding_test.py` to test the embedding of the abstract of the paper
   - `PYTHONPATH=. python tests/embedding_test.py`
@@ -286,7 +285,7 @@ pytest tests/test_rag_pipeline.py::TestRAGPipeline::test_pipeline_run_with_docum
 
 ---
 
-## 2026-05-02
+## 2026-05-02: RAG Pipeline Update
 - Updated `llm/chat_model.py`
   - Initially the `generate_response` method was only taking the question as input and generating a response without considering the retrieved documents. This was not ideal for a RAG pipeline where the LLM should generate responses based on the retrieved context.
   - Updated the `generate_response` method to take both the question and the retrieved documents as input. The retrieved documents are now included in the prompt that is sent to the LLM, allowing it to generate more informed and accurate responses based on the provided context.
@@ -307,7 +306,7 @@ pytest tests/test_rag_pipeline.py::TestRAGPipeline::test_pipeline_run_with_docum
 
 ---
 
-## 2026-05-08
+## 2026-05-08: Endpoints and routes for indexing and deleting documents
 
 - Updated the `services/ingestion_service.py`
   - In the ingestion service, I updated the method that processes the document to also include the `conclusion` section in addition to the `abstract`, `methods`, and `results`. 
@@ -326,7 +325,7 @@ pytest tests/test_rag_pipeline.py::TestRAGPipeline::test_pipeline_run_with_docum
   
   ---
 
-## 2026-05-10
+## 2026-05-10: Indexing and fetching updates
 
 - Updated `indexing_schema.py`
   - Added `IndexFromScrapedRequest` to include a list of article ids
@@ -340,18 +339,18 @@ pytest tests/test_rag_pipeline.py::TestRAGPipeline::test_pipeline_run_with_docum
 
 ---
 
-## 2026-05-15
+## 2026-05-15: Paper fetching workflow using OpenAlex API
 - Renamed `scrape` to `fetch` in the service and the endpoint to better reflect the functionality of fetching articles from nature journal. Scraping is more of a general term for extracting data from websites, while fetching specifically refers to retrieving articles from a source like nature journal. This renaming will help clarify the purpose of the service and endpoint.
-- Initially it was only possible scrape articles one by one  or in a batch by providing a list of nature's article URLs. Now I have tend to implement a new workflow using `OpenAlex` API to search for articles based on keywords and then scrape and index the top results. This will allow for a more dynamic and flexible way to find relevant articles without needing to manually provide URLs. The workflow will be as follows:
+- Initially it was only possible fetch articles one by one  or in a batch by providing a list of nature's article URLs. Now I tend to implement a new workflow using `OpenAlex` API to search for articles based on keywords and then fetch and index the top results. This will allow for a more dynamic and flexible way to find relevant articles without needing to manually provide URLs. The workflow will be as follows:
   - OpenAlex returns a list of articles based on the provided keywords
-  - For each article in the results, UNPPAYWALL API is used to check if the full text is available and to get the URL for scraping
-  - The article is then scraped using the existing scraping methods and the contents are saved to the `data/` directory
-  - After scraping, the article is processed and indexed into the vector database using the existing indexing methods
+  - For each article in the results, UNPPAYWALL API is used to check if the full text is available and to get the URL for fetching
+  - The article is then fetched using the existing fetching methods and the contents are saved to the `data/` directory
+  - After fetching, the article is processed and indexed into the vector database using the existing indexing methods
 - This workflow will be implemented in the `fetch_service.py` and a new endpoint will be added to the `routes.py` to allow users to trigger this
 
 ---
 
-## 2026-05-16
+## 2026-05-16: Indexing service update
 - Updated the `indexing_service.py`
   - Initially, I was directly embedding combining the different sections of the paper per document without chunking them into smaller pieces. This was not ideal as it could lead to loss of important information and context in the embedding process, especially for longer papers. Now I have updated the `index_documents` to section-aware chunking. This means that each section of the paper (abstract, methods, results, conclusion) will be chunked separately and embedded separately. This way when the LLM gets context back, for example, it also knows "this is from the Methods section of paper X" which helps it reason better.
 
@@ -416,7 +415,7 @@ llama3.2:3b, qwen2.5:3b (1.9GB), gemma3:1b(1.2GB), qwen3:3b (2.1GB), phi4-mini:3
 
 ---
 
-## 2026-06-04
+## 2026-06-04: Backend API Integration
 
 - Integrated the backend API with the frontend
   - Added functionality in the frontend to allow users to pull and activate embedding and chat models from ollama through the API
@@ -426,7 +425,7 @@ llama3.2:3b, qwen2.5:3b (1.9GB), gemma3:1b(1.2GB), qwen3:3b (2.1GB), phi4-mini:3
 
 ---
 
-## 2026-06-05
+## 2026-06-05: Retrieval and Indexing Service Updates
 
 - Updated `retrieval_schema.py` to include `top_k` field in the `QueryRequest` which allows users to specify how many relevant chunks they want to retrieve from the vector database.
 - Updated the `indexing_service.py` to include abstract as well in the payload of the point when indexing the chunks. Initially, I was unknowingly leaving out the abstract from the indexed metadata which is an important part of the paper and can provide valuable context for the LLM during retrieval.
@@ -434,7 +433,7 @@ llama3.2:3b, qwen2.5:3b (1.9GB), gemma3:1b(1.2GB), qwen3:3b (2.1GB), phi4-mini:3
 
 ---
 
-## 2026-06-06
+## 2026-06-06: Re-ranking Implementation
 
 - Updated the `retrieval_service.py` to include a re-ranking step after retrieving the relevant chunks from the vector database. Initially, I was just retrieving the top k chunks based on their similarity scores from Qdrant and passing them to the LLM for generating responses. However, this approach can lead to suboptimal results as it does not take into account the relevance of the sections of the paper to the query. For example, if the query is about the results of a clinical study, then chunks from the "Results" section should be ranked higher than chunks from the "Methods" section, even if their similarity scores are similar.
 - Implemented a `Reranker` class that uses a `cross-encoder/ms-marco-MiniLM-L-6-v2` model to re-rank the retrieved chunks based on their relevance to the query, taking into account the content of the chunks and their section information. I am using `cross-encoder/ms-marco-MiniLM-L-6-v2` model for re-ranking which is a smaller and efficient model suitable. The re-ranking step will help ensure that the most relevant chunks are prioritized in the context provided to the LLM, leading to more accurate and informed responses.
@@ -450,7 +449,7 @@ llama3.2:3b, qwen2.5:3b (1.9GB), gemma3:1b(1.2GB), qwen3:3b (2.1GB), phi4-mini:3
 
 ---
 
-## 2026-06-12
+## 2026-06-12: Retrieval Service Update
 - Initially I was only retrieving 20 vectors from the vector database for each query which might not be enough to capture all the relevant information, especially for longer papers with more sections and details. Now I have updated the retrieval service to retrieve up to 50 vectors per query.
 - This improved the reponse of the previous queries correctly.
   - Q: Give me the final performance metric scores of all the trained models according to the paper'Development and validation of machine learning models for predicting extubation failure in patients undergoing cardiac surgery: a retrospective study'?
@@ -464,13 +463,13 @@ llama3.2:3b, qwen2.5:3b (1.9GB), gemma3:1b(1.2GB), qwen3:3b (2.1GB), phi4-mini:3
 
 ---
 
-## 2026-06-18
+## 2026-06-18: Indexing Service Update
 
 - Updated the `indexing_service.py` to include the section name in the chunk text as well. Initially, I was only including the content of the chunk without explicitly mentioning which section it belongs to. I was only including the section information in the payload metadata but not in the chunk text itself. Now I have updated the chunk text to include the section name as a prefix. For example, if the chunk is from the Methods section, the chunk text will start with "Methods: " followed by the content of the chunk. This further improved the relevance of the retrieved chunks and the quality of the responses generated by the LLM, especially for queries that are focused on specific sections of the paper. By explicitly including the section name in the chunk text, it provides clearer context to the LLM about where the information is coming from, which can help it reason better and generate more accurate responses based on the relevant sections of the paper.
 
 ---
 
-## 2026-06-20
+## 2026-06-20: Embedding and Hybrid Search Update
 
 - Updated the `embedder.py`:
   - Included the SparseTextEmbedding `Qdrant/bm25` model 
@@ -483,7 +482,55 @@ llama3.2:3b, qwen2.5:3b (1.9GB), gemma3:1b(1.2GB), qwen3:3b (2.1GB), phi4-mini:3
   - Updated the `create_collection()` method to set up the collection for hybrid search by including both dense and sparse vector configurations.
 - Updated the `indexing_service.py` to include both dense and sparse embeddings when indexing the chunks into the vector database. Each chunk will now have both a dense embedding (from the ollama embedding model) and a sparse embedding (from the Qdrant/bm25 model) stored in the vector database. 
 - Updated the `retrieval_service.py` to utilize the new hybrid search methods in the Qdrant client. Depending on whether the query mentions a specific paper title or not, it will call either `hybrid_search_vectors()` or `hybrid_search_vectors_filtered()` to retrieve the relevant chunks based on both dense and sparse embeddings. 
-- 
+
+---
+
+## 2026-06-21: Query Understanding Issue
+- Issues:
+  - LLM doesn't understand `models` as `machine learning models` and it is retrieving chunks from the `Methods` section which contains the details of the trained machine learning models but since the query is asking about `models`, it is giving more weight to chunks that contain the word "model" in them, even if they are not from the Methods section. This is because the term "model" can be used in different contexts in a paper, and the LLM might be picking up on chunks that mention "model" without fully understanding that the user is specifically asking about machine learning models. To address this issue, I might need to implement a more sophisticated approach to understand the context of the query better and ensure that the retrieved chunks are more relevant to the specific information being asked for, rather than just relying on keyword matching.
+
+
+---
+
+## 2026-06-26: RAG Pipeline Evaluation and Updates
+- Installed `ragas` package locally under `[evaluation]` in `pyproject.toml` to evaluate the RAG pipeline. This is excluded from the running docker image to keep the image size smaller. 
+- Updated the `retrieval_service.py`:
+  - I was not setting the `search_results` to None when the query didn't contain any paper title and instead doing a Hybrid Search with `article_id = None`. This builds a qdrant filter with something like `match: None` and return 0 results. But just right after that, I was checking if the `search_results` is None and then doing a Hybrid Search without any filter. This was causing the retrieval service to always return 0 results for queries that didn't contain any paper title. Now I have updated the logic to set `search_results` to None when the query doesn't contain any paper title and directly do a Hybrid Search without any filter in that case. This ensures that the retrieval service can return relevant results for queries that are not specific to any paper title.
+  - I also increased the `max_chunks_per_article` parameter to 5 to ensure that enough relevant chunks are retrieved from each article, especially for queries that require information from multiple sections of the paper. 
+  - To make the RAGAs evaluation easier, I also added a `context` field to the `QueryResponse` schema which contains the combined text of all the retrieved chunks. 
+- Updated the `pipeline.py` to include the `context` field only when the `ChatRequest` has `include_context=True`. This ensures that the blobby context is exclude from the UI and only used for evaluation purposes when needed.
+
+---
+## 2026-07-03
+
+- Updated the `evaluate_rag.py` to include the `context` field in the evaluation results for allowing more comprehensive evaluation of the RAG pipeline by including the context provided to the LLM along with the generated response and source documents. The evaluation results will now include the following fields:
+  - `query`: The user query
+  - `response`: The response generated by the LLM
+  - `source_documents`: The list of source documents retrieved from the vector database
+  - `context`: The combined text of all the retrieved chunks that were provided to the LLM as context for generating the response
+- Evaluated the RAG pipeline using the `ragas` package and saved the results to a CSV file for further analysis. 
+  - Performed the following combination of evaluations:
+    - Exp 1:
+      - Chat model: `qwen2.5-3b`, Judge model: `qwen2.5-7b`
+    - Exp 2:
+      - Chat model: `llama3.1:8b`, Judge model: `qwen2.5-3b`
+    - Exp 3:
+      - Chat model: `llama3.2:1b`, Judge model: `qwen2.5-3b`
+- TODO: Replace the `cross-encoder/ms-marco-MiniLM-L-6-v2` re-ranker with Qdrant's `late_interaction_embedding_model` and evaluate the RAG pipeline again to see if it improves the relevance of the retrieved chunks and the quality of the responses generated by the LLM.
+
+---
+- PREVIOUS WORK: 
+  - WHY IS IT NOT SUITED FOR MY QUESTION AND WHY MY METHOD MORE SUITED?
+  - ARE THERE OTHER EXISTING TOOLS OTHER THAN WHAT WE ARE DOING? IF YES, BENCHMARK AND TALK ABOUT THEM.
+  - REFERENCES AND TITLES
+- Document everything so far.
+- References for the methodological choices
+- Scores (for all the queries present in the sheet) from the evaluation of the RAG pipeline
+- See if other online LLM can extract those information from the paper: "Development and validation of machine learning models for predicting extubation failure in patients undergoing cardiac surgery: a retrospective study" 
+- Why we chose openalex for fetching papers based on keywords:
+- Duble check what happens to the tables from the extracted contents.
+- How are the points being stored as graph in the vector database? Are they being stored as individual chunks with their own metadata or are they being grouped together based on the article they belong to?
+- Look if we could build a knowledge base (like a vocabulary for searching) that would help give additional contexts for the LLMs. 
 
 TODO:
 - A way to ask a list of questions to all the papers and get the answers in a structured format

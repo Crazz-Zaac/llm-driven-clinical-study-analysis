@@ -1,0 +1,30 @@
+@startuml RetrievalService_Sequence
+skinparam SequenceMessageFontSize 14
+skinparam SequenceParticipantFontSize 16
+
+actor Pipeline
+participant "RetrievalService" as RS
+participant "Vector DB\n(Qdrant)" as DB
+participant "Reranker" as Rerank
+
+Pipeline -> RS: retrieve(query)
+
+RS -> RS: Embed query\n(dense + sparse)
+
+alt paper title mentioned in query
+    RS -> DB: Search within that article\n(top_k x 10 = 50 chunks)
+else no title mentioned
+    RS -> DB: Hybrid search across all articles\n(top_k x 10 = 50 chunks)
+end
+
+DB --> RS: ~50 matching chunks
+
+RS -> RS: Merge chunks into\none doc per article
+note right: Deduplicated into N unique\narticles (N <= 50, varies\nby chunk distribution)
+
+RS -> Rerank: Rerank N articles
+Rerank --> RS: Top 5 ranked articles\n(top_k = 5)
+
+RS --> Pipeline: 5 documents + scores
+
+@enduml

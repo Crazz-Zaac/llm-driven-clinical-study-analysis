@@ -11,7 +11,6 @@ import {
   User,
   Bot,
   Sparkles,
-  AlertCircle,
   FileText,
   Link,
   ChevronDown
@@ -27,6 +26,15 @@ function replaceArticleTitlePlaceholder(content: string, sources?: SourceDocumen
   }
 
   return content.replace(/\[Article Title\]/g, articleTitle)
+}
+
+function formatSourceScore(score?: number | null) {
+  if (typeof score !== "number" || !Number.isFinite(score)) {
+    return null
+  }
+
+  const boundedScore = Math.min(Math.max(score, 0), 1)
+  return `${Math.round(boundedScore * 100)}%`
 }
 
 function MessageBubble({ message }: { message: { role: 'user' | 'assistant'; content: string; timestamp: Date; sources?: SourceDocument[] } }) {
@@ -73,36 +81,39 @@ function MessageBubble({ message }: { message: { role: 'user' | 'assistant'; con
               </button>
               {sourceExpanded && (
                 <div className={cn("mt-2 space-y-2", shouldScrollSources && "max-h-64 overflow-y-auto pr-1")}>
-                  {message.sources!.map((source) => (
-                    <div
-                      key={`${source.article_id}-${source.title}`}
-                      className="text-xs bg-background/50 rounded-lg p-2.5 border border-border/30 hover:border-border/60 transition-colors"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium text-foreground line-clamp-2 text-xs">{source.title}</p>
-                          <div className="flex items-center gap-2 mt-1 flex-wrap">
-                            <span className="font-mono text-xs text-muted-foreground">{source.article_id}</span>
-                            {typeof source.score === "number" && (
-                              <Badge variant="outline" className="text-xs py-0 px-1.5">
-                                {(source.score * 100).toFixed(0)}%
-                              </Badge>
-                            )}
+                  {message.sources!.map((source) => {
+                    const sourceScore = formatSourceScore(source.score)
+                    return (
+                      <div
+                        key={`${source.article_id}-${source.title}`}
+                        className="text-xs bg-background/50 rounded-lg p-2.5 border border-border/30 hover:border-border/60 transition-colors"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-foreground line-clamp-2 text-xs">{source.title}</p>
+                            <div className="flex items-center gap-2 mt-1 flex-wrap">
+                              <span className="font-mono text-xs text-muted-foreground">{source.article_id}</span>
+                              {sourceScore && (
+                                <Badge variant="outline" className="text-xs py-0 px-1.5">
+                                  {sourceScore}
+                                </Badge>
+                              )}
+                            </div>
                           </div>
+                          {source.url && (
+                            <a
+                              href={source.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-primary hover:underline shrink-0 whitespace-nowrap ml-2"
+                            >
+                              <Link className="h-3.5 w-3.5" />
+                            </a>
+                          )}
                         </div>
-                        {source.url && (
-                          <a
-                            href={source.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-primary hover:underline shrink-0 whitespace-nowrap ml-2"
-                          >
-                            <Link className="h-3.5 w-3.5" />
-                          </a>
-                        )}
                       </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               )}
             </div>
@@ -148,7 +159,6 @@ export function ChatInterface() {
   const [input, setInput] = useState('')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const scrollRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
 
@@ -161,12 +171,12 @@ export function ChatInterface() {
     selectedChatModel,
     useHostedModels,
     hostedModelName,
-    contextSources,
+    temperature,
+    maxTokens,
+    topP,
   } = useAppStore()
 
   const hasModel = selectedChatModel || (useHostedModels && hostedModelName)
-  const activeModelName = useHostedModels ? hostedModelName : selectedChatModel
-  const hasContext = contextSources.length > 0
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -247,7 +257,12 @@ export function ChatInterface() {
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: requestMessages }),
+        body: JSON.stringify({
+          messages: requestMessages,
+          temperature,
+          max_tokens: maxTokens,
+          top_p: topP,
+        }),
         signal: controller.signal,
       })
 

@@ -25,14 +25,14 @@ class RAGPipeline:
 
         last_user_message = user_messages[-1].content
 
-        # Build context-aware retrieval query from recent user turns.
-        # Deduplicate consecutive identical turns to avoid a doubled query when the
-        # frontend echoes the same message in the conversation history.
-        deduped_turns: list[str] = []
+        # Build a retrieval query from the most recent user turns.
+        # Consecutive duplicate messages are ignored to avoid
+        # duplicated queries caused by frontend message echoes.
+        retrieval_turns: list[str] = []
         for msg in request.messages:
-            if msg.role == "user" and (not deduped_turns or msg.content != deduped_turns[-1]):
-                deduped_turns.append(msg.content)
-        retrieval_query = " ".join(deduped_turns[-3:])
+            if msg.role == "user" and (not retrieval_turns or msg.content != retrieval_turns[-1]):
+                retrieval_turns.append(msg.content)
+        retrieval_query = " ".join(retrieval_turns[-3:])
 
         logger.debug("Retrieval query: %s", retrieval_query)
 
@@ -48,6 +48,7 @@ class RAGPipeline:
             return ChatResponse(
                 response="Not found in retrieved documents. Please ensure the article is indexed.",
                 source_documents=[],
+                contexts=[],
             )
 
         retrieved_docs = "\n\n".join(f"""
@@ -79,7 +80,10 @@ class RAGPipeline:
                     {last_user_message}
                     """,
                 ),
-            ]
+            ],
+            temperature=request.temperature,
+            max_tokens=request.max_tokens,
+            top_p=request.top_p,
         )
 
         response = self.chat_model.generate_response(chat_request)
@@ -87,4 +91,5 @@ class RAGPipeline:
         return ChatResponse(
             response=response.response,
             source_documents=query_response.source_documents,
+            contexts=query_response.contexts if request.include_contexts else None,
         )

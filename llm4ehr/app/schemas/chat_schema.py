@@ -24,6 +24,28 @@ class ChatRequest(BaseModel):
     messages: List[ChatMessage] = Field(
         ..., description="A list of chat messages forming the conversation history."
     )
+    include_contexts: Optional[bool] = Field(
+        default=False,
+        description="Whether to include context snippets in the response. Defaults to False.",
+    )
+    temperature: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=2.0,
+        description="Sampling temperature for chat generation.",
+    )
+    max_tokens: int = Field(
+        default=2048,
+        ge=1,
+        le=32768,
+        description="Maximum number of tokens to generate.",
+    )
+    top_p: float = Field(
+        default=0.9,
+        ge=0.0,
+        le=1.0,
+        description="Nucleus sampling probability for chat generation.",
+    )
 
 
 class ChatResponse(BaseModel):
@@ -34,4 +56,8 @@ class ChatResponse(BaseModel):
     source_documents: List[SourceDocument] | None = Field(
         default=None,
         description="List of source documents used to generate the response, if applicable.",
+    )
+    contexts: Optional[List[str]] = Field(
+        default=None,
+        description="List of context snippets retrieved from the vector database that were used to generate the response.",
     )

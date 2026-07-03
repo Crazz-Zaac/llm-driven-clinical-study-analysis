@@ -1,0 +1,12 @@
+- Sparse vectors are called sparse because they only store values that are non-zeros.  
+- for every element dense vectors from models like Ollama, OpenAI contain non-zero values
+- Since sparse vectors focuses on relative word weights per document with most values being zero, it is more efficient specially in text-heavy search 
+- 
+- sparse vectors shine in domains and scenarios where rare keywords or specialized terms are present. 
+
+
+
+
+Q. How is RAG evaluated? What frameworks are used? Why using RAGAs? 
+Paper: Retrieval Augmented Generation Evaluation in the Era of Large Language Models: A Comprehensive Survey
+

@@ -30,7 +30,10 @@ class ChatModel:
                     messages=[
                         {"role": msg.role, "content": msg.content}
                         for msg in request.messages
-                    ]
+                    ],
+                    max_tokens=request.max_tokens,
+                    temperature=request.temperature,
+                    top_p=request.top_p,
                 )
                 .choices[0]
                 .message.content

@@ -1,0 +1,51 @@
+@startuml RAG_System
+skinparam ActivityFontSize 18
+skinparam ActivityDiamondFontSize 16
+skinparam ArrowFontSize 14
+skinparam SwimlaneTitleFontSize 18
+skinparam DefaultFontSize 16
+
+|User|
+start
+:Question;
+
+|Pipeline Selector|
+if (Use remote model?) then (yes)
+  :Instantiate RAGPipelineRemote
+  (ChatModel - remote API);
+else (no)
+  :Instantiate RAGPipeline
+  (OllamaChatModel - local);
+endif
+
+|Retriever|
+:Build Retrieval Query
+(last 3 unique user turns);
+:Retrieve Documents;
+
+if (Documents found?) then (no)
+  |User|
+  :Answer
+  ("Not found in retrieved
+  documents.");
+  stop
+else (yes)
+endif
+
+|Context Builder|
+:Format retrieved docs
+(Title, Article ID, Section, Content);
+:Combine system prompt + docs
+= Final Context;
+
+|LLM|
+:Build chat request
+(system: context, user: question);
+:Call chat_model.generate_response
+(local Ollama or remote API);
+
+|User|
+:Answer
+(response + source_documents);
+stop
+@enduml
