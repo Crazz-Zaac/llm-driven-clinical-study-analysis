@@ -16,7 +16,12 @@ logger = logging.getLogger(__name__)
 class RetrievalService:
     """Service for retrieving relevant documents from the vector database."""
 
-    def __init__(self, max_chunks_per_article: int = 5):
+    def __init__(
+        self,
+        max_chunks_per_article: int = 5,
+        candidate_chunks_per_query: int = 200,
+        reranked_chunk_limit: int = 50,
+    ):
         self.embedder = TextEmbedder(show_progress=False)
         self.vector_db = QdrantVectorDB()
         self.collection_name = settings.QDRANT_COLLECTION_NAME
@@ -28,6 +33,8 @@ class RetrievalService:
         self.top_k = (
             5  # Number of unique articles to return after retrieval and reranking
         )
+        self.candidate_chunks_per_query = candidate_chunks_per_query
+        self.reranked_chunk_limit = reranked_chunk_limit
 
     # this function is specifically used to clean up the section headers from the
     # combined text of the retrieved documents to prepare context for LLM evaluation
@@ -72,12 +79,16 @@ class RetrievalService:
         """
         try:
             logger.info(f"Retrieving documents for query: {request.query[:100]}...")
+            final_top_k = request.top_k or self.top_k
 
             dens_vec = self.embedder.embed_dense(request.query, show_timing=False)
             sparse_vec = self.embedder.embed_sparse(request.query)
 
             title_fragment = self._extract_paper_title(request.query)
             search_results = None
+
+            # If a title fragment is found in the query, 
+            # attempt to find the corresponding article ID and perform a filtered search within that article
             if title_fragment:
                 logger.info(f"Extracted title fragment from query: '{title_fragment}'")
                 article_id = self.vector_db.find_article_id_by_title(
@@ -100,7 +111,10 @@ class RetrievalService:
                         dense_vector=dens_vec,
                         sparse_vector=sparse_vec,
                         article_id=article_id,
-                        top_k=self.top_k * 10,
+                        top_k=max(
+                            self.reranked_chunk_limit,
+                            self.max_chunks_per_article * 10,
+                        ),
                     )
                 else:
                     logger.warning(
@@ -108,40 +122,79 @@ class RetrievalService:
                     )
                     search_results = None
 
+            # if no title fragment is found in the query or no article ID is found,
+            # perform a standard hybrid search across all articles
             if search_results is None:
                 search_results = self.vector_db.hybrid_search_vectors(
                     collection_name=self.collection_name,
                     dense_vector=dens_vec,
                     sparse_vector=sparse_vec,
-                    top_k=self.top_k * 10,
+                    top_k=max(self.candidate_chunks_per_query, final_top_k * 20),
                 )
 
-            print(f"len of search results: {len(search_results)}")
+            logger.info("Retrieved %s chunk candidates from Qdrant", len(search_results))
+
+            # prepare chunk candidates for reranking, filtering out any with missing text or article_id
+            chunk_candidates = []
+            for result in search_results:
+                payload = result.payload or {}
+                text = payload.get("combined_text", "")
+                article_id = payload.get("article_id", "")
+                if not text or not article_id:
+                    continue
+
+                chunk_candidates.append(
+                    {
+                        "payload": payload,
+                        "score": float(result.score),
+                        "retrieval_score": float(result.score),
+                    }
+                )
+
+            # Rerank the chunk candidates using the cross-encoder model
+            # before combining them into unique articles for the LLM to use as context
+            reranked_chunks = self.reranker.rerank(
+                request.query,
+                chunk_candidates,
+                text_getter=lambda chunk: chunk["payload"].get("combined_text", ""),
+            )[: self.reranked_chunk_limit]
+
+            logger.info(
+                "Kept %s reranked chunks before article grouping", len(reranked_chunks)
+            )
 
             # Group chunks by article
             chunks_per_article: dict = defaultdict(list)
-            for result in search_results:
-                payload = result.payload or {}
+            for chunk in reranked_chunks:
+                payload = chunk["payload"]
                 chunks_per_article[payload.get("article_id", "")].append(
-                    {"payload": payload, "score": result.score}
+                    {
+                        "payload": payload,
+                        "score": chunk["score"],
+                        "retrieval_score": chunk["retrieval_score"],
+                    }
                 )
 
-            # Build one RetrievedDocument per article by merging its top-scoring chunks.
+            # Build one RetrievedDocument per article by merging its best reranked chunks.
             # Selection is fully section-agnostic: whichever chunks score highest for the
             # query are kept, whether they come from abstract, methods, results, discussion,
             # conclusion, or any other indexed section. Merging multiple chunks prevents the
             # single highest-scoring chunk (which is often an overview-level passage) from
             # being the only content the LLM sees for that article.
             llm_docs = []
-            print(f"Length of chunks_per_article: {len(chunks_per_article)}")
+            logger.info(
+                "Grouped reranked chunks into %s unique articles",
+                len(chunks_per_article),
+            )
             for article_id, chunks in chunks_per_article.items():
                 if not chunks:
                     continue
 
-                # 1. Pick the top-scoring chunks
+                # 1. Pick the top reranked chunks for this article.
                 top_chunks = sorted(chunks, key=lambda x: x["score"], reverse=True)[
                     : self.max_chunks_per_article
                 ]
+                best_chunk = top_chunks[0]
                 best_score = top_chunks[0]["score"]
 
                 # 2. Re-sort by chunk_index so merged text reads in document order
@@ -154,14 +207,20 @@ class RetrievalService:
                     text = c["payload"].get("combined_text", "")
                     if text:
                         parts.append(f"[{section.upper()}]\n{text}")
-                    print(article_id, c["payload"].get("section"), c["score"])
+                    logger.debug(
+                        "Selected chunk article_id=%s section=%s rerank_score=%s retrieval_score=%s",
+                        article_id,
+                        c["payload"].get("section"),
+                        c["score"],
+                        c["retrieval_score"],
+                    )
 
                 merged_text = "\n\n".join(parts)
                 # Preserve ordered unique section names for display
                 merged_sections = ", ".join(
                     dict.fromkeys(c["payload"].get("section", "") for c in top_chunks)
                 )
-                ref = top_chunks[0]["payload"]
+                ref = best_chunk["payload"]
 
                 llm_docs.append(
                     RetrievedDocument(
@@ -175,19 +234,22 @@ class RetrievalService:
                     )
                 )
 
-            print(
-                f"Number of unique articles retrieved before reranking: {len(llm_docs)}"
+            llm_docs = sorted(llm_docs, key=lambda doc: doc.score, reverse=True)[
+                :final_top_k
+            ]
+            logger.info(
+                "Returning %s unique articles after chunk reranking", len(llm_docs)
             )
 
             # Sort by best score and cap to the requested top_k = 5 unique articles
             # rerank the retrieved documents using the cross-encoder model
-            llm_docs = self.reranker.rerank(request.query, llm_docs)[: self.top_k]
-            print(
-                f"Number of unique articles retrieved after reranking: {len(llm_docs)}"
-            )
-            print(
-                f"Contents of retrieved documents after reranking: \n {[doc.combined_text for doc in llm_docs]}"
-            )
+            # llm_docs = self.reranker.rerank(request.query, llm_docs)[: self.top_k]
+            # print(
+            #     f"Number of unique articles retrieved after reranking: {len(llm_docs)}"
+            # )
+            # print(
+            #     f"Contents of retrieved documents after reranking: \n {[doc.combined_text for doc in llm_docs]}"
+            # )
 
             # Converting the RetrievedDocument list to SourceDocument with score for the user response
             user_docs = [
