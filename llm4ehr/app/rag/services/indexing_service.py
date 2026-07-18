@@ -33,6 +33,7 @@ class IndexingService:
         points: list[dict[str, Any]] = []
 
         for doc in documents:
+            global_chunk_idx = 0
             for section_name in [
                 "abstract",
                 "methods",
@@ -79,10 +80,11 @@ class IndexingService:
                                 "abstract": doc.get("abstract", ""),
                                 "section": section_name,
                                 "combined_text": chunk_text,
-                                "chunk_index": i,
+                                "chunk_index": global_chunk_idx,
                             },
                         )
                     )
+                    global_chunk_idx += 1
 
         if points:
             self.vector_db.upsert_vectors(self.collection_name, points)

@@ -534,6 +534,13 @@ llama3.2:3b, qwen2.5:3b (1.9GB), gemma3:1b(1.2GB), qwen3:3b (2.1GB), phi4-mini:3
       - retrieve broad chunk pool across corpus(, e.g. 100-200 chunks) -> rerank chunks -> group by article -> select top 5 papers(2-4 chunks per paper)
       - We retrieve a larger pool of chunks across the entire corpus (100-200 chunks for now) and then rerank them to get the most relevant chunks (top 50 for now). After reranking, we group the chunks by article and select the top (top 5 for now) papers based on the relevance of their chunks. This way, we ensure that we are not excluding potentially useful papers and are providing a more comprehensive context to the LLM for general queries.
 
+---
+
+## 2026-07-18
+
+- Updated 'indexing_service.py':
+  - Initially I was using the chunk index `i` for the `chunk_index` in the payload metadata when indexing the chunks into the vector database. However, this might cause issues since different sections of the paper can have same chunk index `i` (e.g. the first chunk of the abstract and the first chunk of the methods section will both have `i=0`). This can lead to confusion because in the retrieval service, I sort the retrieved chunks based on their `chunk_index` (before preparing the `merged_text`) to maintain the order of the chunks as they appear in the paper. If multiple chunks have the same `chunk_index`, it can lead to incorrect ordering of the chunks in the context provided to the LLM.
+  - Now I have updated the `indexing_service.py` to use a `global_chunk_idx` which is incremented for each chunk across all sections of the paper. This ensures that each chunk has a unique `chunk_index` in the payload metadata, allowing for correct ordering of the chunks during retrieval and merging.
 
 ---
 
