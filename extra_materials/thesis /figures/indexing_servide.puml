@@ -1,0 +1,76 @@
+@startuml IndexingService_Sequence
+skinparam SequenceMessageFontSize 14
+skinparam SequenceParticipantFontSize 16
+skinparam maxMessageSize 250
+scale 1.15
+
+actor Caller
+participant "IndexingService" as IS
+participant "TextChunker" as Chunker
+participant "TextEmbedder" as Embedder
+participant "Vector DB\n(Qdrant)" as DB
+
+Caller -> IS: index_documents(documents)
+
+IS -> DB: create_collection(collection_name, vector_size)
+
+alt stop_requested
+    IS --> Caller: {success: false, indexed_count: 0}
+else documents empty
+    IS --> Caller: {success: true, indexed_count: 0}
+else proceed
+    loop for each document in documents
+        IS -> IS: global_chunk_idx = 0
+
+        loop for each section_name in\n[abstract, methods, results,\ndiscussion, conclusion]
+            IS -> IS: section_text = doc.get(section_name)
+
+            alt section_text is empty
+                IS -> IS: skip section
+            else section_text present
+                IS -> Chunker: split_text(section_text)
+                Chunker --> IS: chunks
+
+                IS -> IS: build chunk_texts\n("Title/Section/Content" prefixed)
+
+                alt chunk_texts empty
+                    IS -> IS: skip section
+                else chunk_texts present
+                    IS -> Embedder: embed_dense(chunk_texts)
+                    Embedder --> IS: dense embeddings
+
+                    IS -> Embedder: embed_sparse_batch(chunk_texts)
+                    Embedder --> IS: sparse embeddings
+
+                    loop for each (chunk_text, embedding, sparse)
+                        IS -> IS: id = _make_point_id(\n"article_id_section_i")
+                        note right
+                          i is the LOCAL per-section
+                          enumerate() index, used only
+                          for point-ID hashing
+                        end note
+
+                        IS -> IS: build PointStruct\npayload.chunk_index =\nglobal_chunk_idx
+                        note right
+                          global_chunk_idx is stored in
+                          the payload - increments across
+                          ALL sections for this article,
+                          giving a true document-order index
+                        end note
+
+                        IS -> IS: global_chunk_idx += 1
+                        IS -> IS: append point to points[]
+                    end
+                end
+            end
+        end
+    end
+
+    alt points is non-empty
+        IS -> DB: upsert_vectors(collection_name, points)
+    end
+
+    IS --> Caller: {success: true,\nindexed_count: len(points)}
+end
+
+@enduml

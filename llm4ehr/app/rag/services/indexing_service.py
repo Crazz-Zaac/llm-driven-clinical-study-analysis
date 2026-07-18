@@ -54,11 +54,11 @@ class IndexingService:
                 if not chunk_texts:
                     continue
 
-                embeddings = self.embedder.embed_dense(chunk_texts, show_timing=False)
+                dense_embeddings = self.embedder.embed_dense(chunk_texts, show_timing=False)
                 sparse_embeddings = self.embedder.embed_sparse_batch(chunk_texts)
 
-                for i, (chunk_text, embedding, sparse) in enumerate(
-                    zip(chunk_texts, embeddings, sparse_embeddings)
+                for i, (chunk_text, dense, sparse) in enumerate(
+                    zip(chunk_texts, dense_embeddings, sparse_embeddings)
                 ):
                     if self._stop_requested:
                         break
@@ -68,7 +68,7 @@ class IndexingService:
                                 f"{doc['article_id']}_{section_name}_{i}"
                             ),
                             vector={
-                                "dense": embedding,
+                                "dense": dense,
                                 "sparse": SparseVector(
                                     indices=sparse["indices"], values=sparse["values"]
                                 ),

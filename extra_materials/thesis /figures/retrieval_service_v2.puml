@@ -1,0 +1,47 @@
+@startuml RetrievalService_Sequence
+skinparam SequenceMessageFontSize 14
+skinparam SequenceParticipantFontSize 16
+skinparam maxMessageSize 250
+scale 1.5
+
+actor Pipeline
+participant "RetrievalService" as RS
+participant "Vector DB\n(Qdrant)" as DB
+participant "Reranker" as Rerank
+
+Pipeline -> RS: retrieve(query)
+
+RS -> RS: Embed query\n(dense + sparse)
+RS -> RS: Extract quoted/named\npaper title from query
+
+alt title fragment found AND article resolved
+    RS -> DB: find_article_id_by_title(title_fragment)
+    DB --> RS: article_id
+    RS -> DB: hybrid_search_vectors_filtered(article_id)\ntop_k = max(reranked_chunk_limit,\nmax_chunks_per_article x 10) = 50
+    DB --> RS: 50 chunk candidates\n(single article)
+else no title fragment / article not found
+    RS -> DB: hybrid_search_vectors (all articles)\ntop_k = max(candidate_chunks_per_query,\nfinal_top_k x 20) = 200
+    DB --> RS: 200 chunk candidates\n(across articles)
+end
+
+RS -> Rerank: rerank(query, ALL chunk_candidates)\n(cross-encoder scores every\ncandidate passed in - no\ninternal truncation)
+Rerank --> RS: All candidates,\nsorted by relevance score\n(50 or 200, same count as input)
+
+RS -> RS: Slice to top\nreranked_chunk_limit = 50
+
+note right of RS
+  Reranking happens on
+  individual CHUNKS, before
+  grouping into articles.
+end note
+
+RS -> RS: Group the (up to 50)\nreranked chunks by article_id
+note right: N unique articles\n(N <= 50, varies by\nchunk distribution)
+
+RS -> RS: Per article:\n- keep top max_chunks_per_article (5)\n  chunks by rerank score\n- re-sort by chunk_index\n- concatenate with [SECTION] tags\n  into one merged document
+
+RS -> RS: Sort N merged articles\nby best chunk score,\ncap to final_top_k = 5
+
+RS --> Pipeline: 5 documents + scores\n(sigmoid-mapped relevance)
+
+@enduml
