@@ -1,0 +1,49 @@
+@startuml
+title Evaluation of the LLM4EHR RAG Pipeline Using RAGAS
+
+actor Researcher
+participant "Golden Test Dataset" as Dataset
+participant "RAG System" as RAG
+participant "Retriever" as Retriever
+participant "Generator LLM" as Generator
+participant "RAGAS Evaluator" as Ragas
+participant "Judge LLM" as Judge
+participant "Embedding Model" as Embedder
+database "Evaluation Results" as Results
+
+Researcher -> Dataset: Select evaluation questions
+Dataset --> Researcher: Questions and reference answers
+
+loop Each evaluation question
+    Researcher -> RAG: Submit question
+
+    RAG -> Retriever: Retrieve relevant contexts
+    Retriever --> RAG: Ranked contexts
+
+    RAG -> Generator: Generate grounded response
+    Generator --> RAG: Generated answer
+
+    RAG --> Researcher: Answer and retrieved contexts
+
+    Researcher -> Ragas: Question, answer,\ncontexts and reference
+
+    Ragas -> Judge: Evaluate faithfulness
+    Judge --> Ragas: Claim support decisions
+
+    Ragas -> Judge: Evaluate context recall
+    Judge --> Ragas: Reference-claim coverage
+
+    Ragas -> Judge: Evaluate context precision
+    Judge --> Ragas: Context relevance decisions
+
+    Ragas -> Judge: Generate questions from answer
+    Judge --> Ragas: Synthetic questions
+    Ragas -> Embedder: Compare synthetic and\noriginal questions
+    Embedder --> Ragas: Similarity scores
+
+    Ragas -> Results: Store metric scores
+end
+
+Results --> Researcher: Aggregate and\nper-question evaluation
+
+@enduml

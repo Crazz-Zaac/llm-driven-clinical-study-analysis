@@ -4,7 +4,7 @@ import sys
 import time
 from pathlib import Path
 
-# Suppress the deprecation warnings so your logs stay clean
+# Suppress the deprecation warnings so the logs stay clean
 import warnings
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -277,7 +277,7 @@ def add_derived_correctness(df, metric_cols: list[str], threshold: float):
 
 def main():
     dataset_path = Path(__file__).parent / "datasets" / "goldens.json"
-    results_path = Path(__file__).parent / "results" / "ragas_results_qwen_2_5.csv"
+    results_path = Path(__file__).parent / "results" / "ragas_results_qwen_2_5_v2.csv"
 
     parser = argparse.ArgumentParser(
         description="Run RAGAs evaluation against the live RAG API"
@@ -389,13 +389,16 @@ def main():
     eval_dataset, sample_metadata = build_eval_dataset(test_cases, args)
 
     if len(eval_dataset) == 0:
-        logger.info("No samples were successfully collected. Aborting.", file=sys.stderr)
+        logger.info(
+            "No samples were successfully collected. Aborting.", file=sys.stderr
+        )
         sys.exit(1)
 
     logger.info(
         f"\nCollected {len(eval_dataset)} valid samples. Running RAGAs evaluation...\n"
     )
 
+    # Build the judge LLM and embeddings for RAGAs evaluation
     judge_llm, judge_embeddings = build_judge(args)
 
     metric_builders = {

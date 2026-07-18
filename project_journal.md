@@ -450,6 +450,7 @@ llama3.2:3b, qwen2.5:3b (1.9GB), gemma3:1b(1.2GB), qwen3:3b (2.1GB), phi4-mini:3
 ---
 
 ## 2026-06-12: Retrieval Service Update
+
 - Initially I was only retrieving 20 vectors from the vector database for each query which might not be enough to capture all the relevant information, especially for longer papers with more sections and details. Now I have updated the retrieval service to retrieve up to 50 vectors per query.
 - This improved the reponse of the previous queries correctly.
   - Q: Give me the final performance metric scores of all the trained models according to the paper'Development and validation of machine learning models for predicting extubation failure in patients undergoing cardiac surgery: a retrospective study'?
@@ -535,6 +536,13 @@ llama3.2:3b, qwen2.5:3b (1.9GB), gemma3:1b(1.2GB), qwen3:3b (2.1GB), phi4-mini:3
 
 
 ---
+
+## Meeting with supervisor
+
+- domain specific llm model vs general llm model
+- include tables from the paper as well
+
+
 - PREVIOUS WORK: 
   - WHY IS IT NOT SUITED FOR MY QUESTION AND WHY MY METHOD MORE SUITED?
   - ARE THERE OTHER EXISTING TOOLS OTHER THAN WHAT WE ARE DOING? IF YES, BENCHMARK AND TALK ABOUT THEM.
@@ -548,7 +556,7 @@ llama3.2:3b, qwen2.5:3b (1.9GB), gemma3:1b(1.2GB), qwen3:3b (2.1GB), phi4-mini:3
 - How are the points being stored as graph in the vector database? Are they being stored as individual chunks with their own metadata or are they being grouped together based on the article they belong to?
 - Look if we could build a knowledge base (like a vocabulary for searching) that would help give additional contexts for the LLMs. 
 
-TODO:
+
 - A way to ask a list of questions to all the papers and get the answers in a structured format
 - Prompt -> Answers from each paper
 - Scrap papers based on the keywords (a list of papers) -> 10 papers  
