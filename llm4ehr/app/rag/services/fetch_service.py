@@ -1,10 +1,13 @@
 import logging
+import json
+from pathlib import Path
 
 from app.schemas.fetch_schema import (
     FetchTextRequest,
     FetchTextResponse,
     FetchTextBatchRequest,
     FetchTextBatchResponse,
+    FetchTextBatchFailure,
     ArticleSchema,
     SectionSchema,
     MetadataSchema,
@@ -47,17 +50,20 @@ class FetchTextService:
 
             article_id = self.fetcher.extract_article_id(url)
 
-            html_content, article_title = self.fetcher.extract_article_html(url)
-            if not html_content:
-                raise ValueError(f"Failed to extract HTML content from {url}")
+            _html_content, article_title, raw_html = self.fetcher.extract_article_html(
+                url
+            )
+            if not raw_html:
+                raise ValueError(f"Failed to extract article HTML from {url}")
 
-            sections_dict = self.fetcher.extract_sections(html_content)
-            missing_sections = [
-                key for key, value in sections_dict.items() if not value
-            ]
-            if missing_sections:
+            # Keep this path aligned with ArticleFetcher.process_article so
+            # direct URL fetches resolve Nature's linked full-size tables.
+            sections_dict, _external_tables = self.fetcher.extract_sections_with_tables(
+                raw_html, url
+            )
+            if not any(sections_dict.values()):
                 raise ValueError(
-                    f"Found missing [{', '.join(missing_sections)}] for article ID: {article_id}"
+                    f"No article sections could be extracted for article ID: {article_id}"
                 )
             sections = SectionSchema(**sections_dict)
 
@@ -102,6 +108,7 @@ class FetchTextService:
             FetchTextBatchResponse with the fetched article data
         """
         articles: list[ArticleSchema] = []
+        failed_urls: list[FetchTextBatchFailure] = []
         for url in request.urls:
             try:
                 response = self.fetch_text(
@@ -111,17 +118,13 @@ class FetchTextService:
                 articles.append(response.article)
             except Exception as e:
                 logger.warning(f"Skipping URL due to fetch error: {url} ({str(e)})")
+                failed_urls.append(FetchTextBatchFailure(url=url, error=str(e)))
 
-        return FetchTextBatchResponse(articles=articles)
+        return FetchTextBatchResponse(articles=articles, failed_urls=failed_urls)
 
     def list_fetched_articles(self) -> list[dict[str, str | None]]:
         """List all fetched articles from the data/fetched_articles/ directory."""
-        from pathlib import Path
-        import json
-
-        article_dir = Path(settings.FETCHED_ARTICLES_DIR)
-        if not article_dir.is_absolute():
-            article_dir = Path(__file__).resolve().parents[3] / article_dir
+        article_dir = self._fetched_articles_dir()
         if not article_dir.exists():
             return []
 
@@ -146,3 +149,48 @@ class FetchTextService:
                 logger.error(f"Failed to load article from {file}: {str(e)}")
 
         return articles
+
+    def delete_fetched_articles(
+        self, article_ids: list[str], delete_all: bool = False
+    ) -> tuple[int, list[str]]:
+        """Delete all stored JSON snapshots for selected fetched articles or all articles."""
+        article_dir = self._fetched_articles_dir()
+        if not article_dir.exists() or (not delete_all and not article_ids):
+            return 0, []
+
+        selected_ids = set(article_ids)
+        deleted_article_ids: set[str] = set()
+        deleted_files: list[str] = []
+        unparseable_deleted_count = 0
+
+        for file in article_dir.glob("*.json"):
+            try:
+                article_id = None
+                if delete_all:
+                    try:
+                        with open(file, "r", encoding="utf-8") as f:
+                            article_id = json.load(f).get("article_id")
+                    except (OSError, ValueError) as e:
+                        logger.warning("Deleting unreadable fetched article file %s: %s", file, e)
+                else:
+                    with open(file, "r", encoding="utf-8") as f:
+                        article_id = json.load(f).get("article_id")
+                        if article_id not in selected_ids:
+                            continue
+                file.unlink()
+                deleted_files.append(str(file))
+                if article_id:
+                    deleted_article_ids.add(article_id)
+                else:
+                    unparseable_deleted_count += 1
+            except Exception as e:
+                logger.error("Failed to delete fetched article file %s: %s", file, e)
+
+        return len(deleted_article_ids) + unparseable_deleted_count, deleted_files
+
+    @staticmethod
+    def _fetched_articles_dir() -> Path:
+        article_dir = Path(settings.FETCHED_ARTICLES_DIR)
+        if not article_dir.is_absolute():
+            return Path(__file__).resolve().parents[3] / article_dir
+        return article_dir

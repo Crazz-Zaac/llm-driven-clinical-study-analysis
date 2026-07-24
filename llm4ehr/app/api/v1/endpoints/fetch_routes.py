@@ -8,6 +8,8 @@ from app.schemas.fetch_schema import (
     FetchTextBatchRequest,
     FetchTextBatchResponse,
     FetchTextListResponse,
+    DeleteFetchedArticlesRequest,
+    DeleteFetchedArticlesResponse,
 )
 from app.rag.services.fetch_service import FetchTextService
 from app.research.paper_fetcher import PaperFetcher
@@ -114,4 +116,37 @@ async def list_fetched_articles():
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"List fetched articles error: {str(e)}",
+        )
+
+
+@router.delete(
+    "/articles",
+    response_model=DeleteFetchedArticlesResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def delete_fetched_articles(
+    request: DeleteFetchedArticlesRequest, db: Session = Depends(get_db)
+):
+    """Delete article files and their fetch history, allowing them to be fetched again."""
+    try:
+        fetch_service = FetchTextService()
+        deleted_count, deleted_files = fetch_service.delete_fetched_articles(
+            request.article_ids, request.delete_all
+        )
+        crud.delete_fetched_papers(
+            db,
+            article_ids=request.article_ids,
+            article_urls=request.article_urls,
+            delete_all=request.delete_all,
+        )
+        return {
+            "success": True,
+            "deleted_count": deleted_count,
+            "deleted_files": deleted_files,
+        }
+    except Exception as e:
+        logger.error(f"Error deleting fetched articles: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Delete fetched articles error: {str(e)}",
         )

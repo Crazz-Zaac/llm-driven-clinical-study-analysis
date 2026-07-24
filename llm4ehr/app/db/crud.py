@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from app.db.tables.document import FetchedPaper, QueryCursor, FetchJob
 
 
@@ -18,6 +19,32 @@ def mark_paper_fetched(
 
 def get_all_fetched(db: Session) -> list[FetchedPaper]:
     return db.query(FetchedPaper).order_by(FetchedPaper.fetched_at.desc()).all()
+
+
+def delete_fetched_papers(
+    db: Session,
+    article_ids: list[str] | None = None,
+    article_urls: list[str] | None = None,
+    delete_all: bool = False,
+) -> int:
+    """Remove fetch-history rows so deleted papers may be fetched again."""
+    query = db.query(FetchedPaper)
+    if delete_all:
+        deleted_count = query.delete(synchronize_session=False)
+        # Cursor positions are part of the fetched corpus state. Resetting them
+        # ensures the next fetch starts from the first page again.
+        db.query(QueryCursor).delete(synchronize_session=False)
+    else:
+        filters = []
+        if article_ids:
+            filters.append(FetchedPaper.doi.in_(article_ids))
+        if article_urls:
+            filters.append(FetchedPaper.url.in_(article_urls))
+        if not filters:
+            return 0
+        deleted_count = query.filter(or_(*filters)).delete(synchronize_session=False)
+    db.commit()
+    return deleted_count
 
 
 #  QueryCursor

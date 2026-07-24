@@ -5,6 +5,7 @@
 - Building docker image from root folder (llm4ehr): `docker build -f docker/Dockerfile -t llm4ehr-app .`
 - Generating **requirements.txt** from poetry: `poetry export -f requirements.txt --output requirements.txt --without-hashes`
 - Add package to poetry only for evaluation (for example): `poetry add -G evaluation streamlit`
+- Testing scripts: `PYTHONPATH=. python tests/embedding_test.py`
 ---
 
 # Project History
@@ -538,16 +539,26 @@ llama3.2:3b, qwen2.5:3b (1.9GB), gemma3:1b(1.2GB), qwen3:3b (2.1GB), phi4-mini:3
 
 ## 2026-07-18
 
-- Updated 'indexing_service.py':
+- Updated `indexing_service.py`:
   - Initially I was using the chunk index `i` for the `chunk_index` in the payload metadata when indexing the chunks into the vector database. However, this might cause issues since different sections of the paper can have same chunk index `i` (e.g. the first chunk of the abstract and the first chunk of the methods section will both have `i=0`). This can lead to confusion because in the retrieval service, I sort the retrieved chunks based on their `chunk_index` (before preparing the `merged_text`) to maintain the order of the chunks as they appear in the paper. If multiple chunks have the same `chunk_index`, it can lead to incorrect ordering of the chunks in the context provided to the LLM.
   - Now I have updated the `indexing_service.py` to use a `global_chunk_idx` which is incremented for each chunk across all sections of the paper. This ensures that each chunk has a unique `chunk_index` in the payload metadata, allowing for correct ordering of the chunks during retrieval and merging.
+- Prepared the RAGAS evaluation powerpoint slides to present to the supervisor.
+
+---
+
+## 2026-07-24
+
+- Updated `fetcher/article_fetcher.py`:
+  - Initially I was not including any tabular data from the paper when fetching the contents. I thought they were in image format but now I realized they are actually in the html format and can be extracted as text. Now I have updated the `fetcher/article_fetcher.py` to extract the tabular data from the paper and include it right exactly in the order it appears in the paper. This was very necessary because many description only contains the main outcome from the tables and don't include the entire findings and this was causing the LLM to not have enough context to answer questions. Now with the tabular data included, the LLM has access to all the relevant information and can provide more accurate and comprehensive responses to queries.
+  - Updated the article fetcher to also apply the latest table inclusion while fetching one or bulk of articles from the OpenAlex API
+- Updated the frontend to align with the latest changes in the backend API and to include the new functionalities for fetching articles from OpenAlex API and indexing them into the vector database.
 
 ---
 
 ## Meeting with supervisor
 
 - domain specific llm model vs general llm model
-- include tables from the paper as well
+- [x] include tables from the paper as well
 
 
 - PREVIOUS WORK: 

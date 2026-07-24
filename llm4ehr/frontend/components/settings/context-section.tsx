@@ -33,6 +33,11 @@ type FetchedArticle = {
   url: string
 }
 
+type BatchFetchResponse = {
+  articles?: FetchedArticle[]
+  failed_urls?: Array<{ url: string; error: string }>
+}
+
 export function ContextSection() {
   const {
     contextSources,
@@ -59,6 +64,7 @@ export function ContextSection() {
   const [fetchError, setFetchError] = useState<string | null>(null)
   const [isFetching, setIsFetching] = useState(false)
   const [isListingFetched, setIsListingFetched] = useState(false)
+  const [isDeletingFetched, setIsDeletingFetched] = useState(false)
   const [fetchedArticles, setFetchedArticles] = useState<FetchedArticle[]>([])
   const [selectedArticleIds, setSelectedArticleIds] = useState<string[]>([])
   const [indexingTarget, setIndexingTarget] = useState<"context" | "fetched">("context")
@@ -208,6 +214,9 @@ export function ContextSection() {
       }
       const data = await response.json()
       setFetchedArticles(data.articles ?? [])
+      setSelectedArticleIds((selected) =>
+        selected.filter((id) => data.articles?.some((article: FetchedArticle) => article.article_id === id))
+      )
     } catch (error) {
       setFetchError(error instanceof Error ? error.message : "Failed to list fetched articles")
     } finally {
@@ -221,6 +230,11 @@ export function ContextSection() {
 
   const handleFetchFromOpenAlex = async () => {
     if (!fetchQuery.trim()) return
+    const queryTerms = fetchQuery
+      .split(",")
+      .map((term) => term.trim())
+      .filter(Boolean)
+    if (queryTerms.length === 0) return
     setIsFetching(true)
     setFetchError(null)
     setFetchStatus(null)
@@ -229,7 +243,7 @@ export function ContextSection() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          query: fetchQuery.trim(),
+          query: queryTerms,
           max_results: Number(fetchMaxResults) || 20,
         }),
       })
@@ -237,7 +251,16 @@ export function ContextSection() {
         const message = await response.text()
         throw new Error(message || "Fetch failed")
       }
-      setFetchStatus("Fetch completed. Refresh the list to view articles.")
+      const data = await response.json()
+      const newlyFetched = data.newly_fetched ?? 0
+      const totalFound = data.total_found ?? 0
+      const alreadyFetched = data.already_fetched ?? 0
+      const unavailable = data.unavailable ?? 0
+      setFetchStatus(
+        newlyFetched > 0
+          ? `Fetched ${newlyFetched} of ${totalFound} result(s). ${alreadyFetched} already fetched; ${unavailable} unavailable.`
+          : `No new articles fetched from ${totalFound} result(s). ${alreadyFetched} already fetched; ${unavailable} unavailable.`
+      )
       await loadFetchedArticles()
     } catch (error) {
       setFetchError(error instanceof Error ? error.message : "Fetch failed")
@@ -293,8 +316,20 @@ export function ContextSection() {
         const message = await response.text()
         throw new Error(message || "Batch fetch failed")
       }
-      setFetchStatus(`Fetched ${urls.length} article(s).`)
-      setBatchUrls("")
+      const data: BatchFetchResponse = await response.json()
+      const fetchedCount = data.articles?.length ?? 0
+      const failures = data.failed_urls ?? []
+      if (fetchedCount > 0) {
+        setFetchStatus(`Fetched ${fetchedCount} article(s).`)
+        setBatchUrls("")
+      }
+      if (failures.length > 0) {
+        setFetchError(
+          failures
+            .map((failure) => `${failure.url}: ${failure.error}`)
+            .join(" · ")
+        )
+      }
       await loadFetchedArticles()
     } catch (error) {
       setFetchError(error instanceof Error ? error.message : "Batch fetch failed")
@@ -309,6 +344,42 @@ export function ContextSection() {
         ? prev.filter((id) => id !== articleId)
         : [...prev, articleId]
     )
+  }
+
+  const handleDeleteFetched = async (deleteAll: boolean) => {
+    if (!deleteAll && selectedArticleIds.length === 0) return
+    const target = deleteAll ? "all fetched articles" : `${selectedArticleIds.length} selected article(s)`
+    if (!window.confirm(`Delete ${target}? This removes their fetched source files and fetch history, and cannot be undone.`)) return
+
+    setIsDeletingFetched(true)
+    setFetchError(null)
+    setFetchStatus(null)
+    try {
+      const selectedArticleUrls = fetchedArticles
+        .filter((article) => selectedArticleIds.includes(article.article_id))
+        .map((article) => article.url)
+      const response = await fetch(`${API_BASE}/fetch/articles`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          delete_all: deleteAll,
+          article_ids: deleteAll ? [] : selectedArticleIds,
+          article_urls: deleteAll ? [] : selectedArticleUrls,
+        }),
+      })
+      if (!response.ok) {
+        const message = await response.text()
+        throw new Error(message || "Failed to delete fetched articles")
+      }
+      const data = await response.json()
+      setSelectedArticleIds([])
+      setFetchStatus(`Deleted ${data.deleted_count ?? 0} fetched article(s) and cleared their fetch history.`)
+      await loadFetchedArticles()
+    } catch (error) {
+      setFetchError(error instanceof Error ? error.message : "Failed to delete fetched articles")
+    } finally {
+      setIsDeletingFetched(false)
+    }
   }
 
   const handleFileUpload = useCallback((files: FileList | null) => {
@@ -575,11 +646,11 @@ export function ContextSection() {
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="space-y-3">
-            <Label htmlFor="fetch-query">OpenAlex Query</Label>
+            <Label htmlFor="fetch-query">OpenAlex Query (comma-separated terms)</Label>
             <div className="flex flex-wrap gap-2">
               <Input
                 id="fetch-query"
-                placeholder="e.g., prostate cancer radiomics"
+                placeholder="e.g., MIMIC-IV, retrospective, machine learning"
                 value={fetchQuery}
                 onChange={(event) => setFetchQuery(event.target.value)}
                 className="flex-1 min-w-[220px]"
@@ -652,6 +723,24 @@ export function ContextSection() {
                 </Button>
                 <Button variant="outline" size="sm" onClick={handleIndexSelected} disabled={selectedArticleIds.length === 0}>
                   Index Selected
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleDeleteFetched(false)}
+                  disabled={selectedArticleIds.length === 0 || isDeletingFetched}
+                >
+                  {isDeletingFetched ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                  <span className="ml-2">Delete Selected</span>
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => handleDeleteFetched(true)}
+                  disabled={isDeletingFetched}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  <span className="ml-2">Delete All</span>
                 </Button>
               </div>
             </div>
