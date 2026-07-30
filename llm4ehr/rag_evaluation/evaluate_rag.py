@@ -3,6 +3,7 @@ import json
 import sys
 import time
 from pathlib import Path
+import os
 
 # Suppress the deprecation warnings so the logs stay clean
 import warnings
@@ -277,7 +278,7 @@ def add_derived_correctness(df, metric_cols: list[str], threshold: float):
 
 def main():
     dataset_path = Path(__file__).parent / "datasets" / "goldens.json"
-    results_path = Path(__file__).parent / "results" / "ragas_results_qwen_2_5_v2.csv"
+    results_path = Path(__file__).parent / "results_v2" / "ragas_results_llama_3_1_8b.csv"
 
     parser = argparse.ArgumentParser(
         description="Run RAGAs evaluation against the live RAG API"
