@@ -1,5 +1,12 @@
 from pydantic import BaseModel, Field
 from app.schemas.source_document_schema import SourceDocument
+from enum import Enum
+
+
+class RetrievalScope(str, Enum):
+    SPECIFIC_PAPER = "specific_paper"
+    ALL_PAPERS = "all_papers"
+    RELEVANT_PAPERS = "relevant_papers"
 
 
 class RetrievedDocument(BaseModel):
@@ -15,7 +22,17 @@ class RetrievedDocument(BaseModel):
 
 class QueryRequest(BaseModel):
     query: str = Field(..., description="The natural language query to be processed.")
-    top_k: int = Field(default=5, ge=1, le=20, description="Number of documents to retrieve.")
+    retrieval_scope: RetrievalScope = Field(
+        default=RetrievalScope.ALL_PAPERS,
+        description="Scope of retrieval: 'relevant_papers', 'all_papers', or 'specific_paper'.",
+    )
+    article_id: str | None = Field(
+        default=None,
+        description="The ID of the specific article to retrieve documents from. Optional when a paper title is included in the query.",
+    )
+    top_k: int = Field(
+        default=5, ge=1, le=20, description="Number of documents to retrieve."
+    )
 
 
 class QueryResponse(BaseModel):

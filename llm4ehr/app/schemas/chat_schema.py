@@ -3,6 +3,7 @@ from typing import List, Optional
 from enum import Enum
 
 from app.schemas.source_document_schema import SourceDocument
+from app.schemas.retrieval_schema import RetrievalScope
 
 
 class ChatRole(str, Enum):
@@ -27,6 +28,10 @@ class ChatRequest(BaseModel):
     include_contexts: Optional[bool] = Field(
         default=False,
         description="Whether to include context snippets in the response. Defaults to False.",
+    )
+    retrieval_scope: RetrievalScope = Field(
+        default=RetrievalScope.RELEVANT_PAPERS,
+        description="Scope used to retrieve documents for the chat response.",
     )
     temperature: float = Field(
         default=0.7,
@@ -60,4 +65,8 @@ class ChatResponse(BaseModel):
     contexts: Optional[List[str]] = Field(
         default=None,
         description="List of context snippets retrieved from the vector database that were used to generate the response.",
+    )
+    retrieval_scope: RetrievalScope | None = Field(
+        default=None,
+        description="Scope used to retrieve documents for this response.",
     )

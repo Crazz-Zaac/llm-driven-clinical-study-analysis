@@ -161,6 +161,30 @@ class QdrantVectorDB:
         )
         return results[0].payload.get("article_id") if results else None
 
+    def get_all_article_ids(self, collection_name: str) -> list[str]:
+        """Return unique article IDs currently indexed in a collection."""
+        article_ids: set[str] = set()
+        next_page_offset = None
+
+        while True:
+            results, next_page_offset = self.client.scroll(
+                collection_name=collection_name,
+                limit=256,
+                offset=next_page_offset,
+                with_payload=["article_id"],
+                with_vectors=False,
+            )
+
+            for point in results:
+                article_id = (point.payload or {}).get("article_id")
+                if article_id:
+                    article_ids.add(article_id)
+
+            if next_page_offset is None:
+                break
+
+        return sorted(article_ids)
+
     def delete_by_article_ids(self, collection_name: str, article_ids: list[str]):
         if not article_ids:
             return

@@ -4,7 +4,6 @@ import requests
 from app.schemas.chat_schema import ChatRequest, ChatResponse
 from app.core.config import settings
 from app.db.activate_model import get_active_chat_model
-from app.rag.services.ollama_service import OllamaService
 
 
 class OllamaChatModel:
@@ -29,6 +28,7 @@ class OllamaChatModel:
                     "temperature": request.temperature,
                     "num_predict": request.max_tokens,
                     "top_p": request.top_p,
+                    "num_ctx": settings.OLLAMA_NUM_CTX,  # e.g. 16384
                 },
                 "stream": False,
             }

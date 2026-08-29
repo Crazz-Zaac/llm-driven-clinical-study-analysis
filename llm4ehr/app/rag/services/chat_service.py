@@ -1,7 +1,5 @@
 from app.schemas.chat_schema import ChatRequest, ChatResponse
 from app.rag.llm.remote_chat_model import ChatModel
-from app.rag.prompts.system_prompt import SYSTEM_PROMPT
-
 
 class ChatService:
     def __init__(self):

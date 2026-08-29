@@ -30,6 +30,15 @@ from ragas.metrics import (
     LLMContextPrecisionWithReference,  # measures whether the retrieved contexts are relevant to the user's question and the LLM's response
 )
 
+CSV_METADATA_COLUMNS = [
+    "article_id",
+    "article_title",
+    "field_id",
+    "category",
+    "status",
+    "section",
+]
+
 METRIC_COLS = [
     "faithfulness",
     "answer_relevancy",
@@ -172,17 +181,97 @@ def build_judge(args):
     return llm, embeddings
 
 
-def load_test_cases(path: str) -> list[dict]:
-    with open(path, "r", encoding="utf-8") as f:
+def _clean_value(value) -> str:
+    if value is None or pd.isna(value):
+        return ""
+    return str(value).strip()
+
+
+def csv_to_test_cases(path: str | Path) -> list[dict]:
+    """Convert the ML4EHR CSV into the JSON shape consumed by this evaluator."""
+    df = pd.read_csv(path, encoding="utf-8-sig")
+    df = df.loc[:, [col for col in df.columns if not str(col).startswith("Unnamed")]]
+    df = df.dropna(how="all")
+
+    for col in ["article_id", "article_title", "field_id"]:
+        if col in df.columns:
+            df[col] = df[col].ffill()
+
+    required_cols = {"question", "reference_answer"}
+    missing_cols = sorted(required_cols - set(df.columns))
+    if missing_cols:
+        raise ValueError(
+            f"CSV dataset is missing required column(s): {', '.join(missing_cols)}"
+        )
+
+    test_cases = []
+    for index, row in df.iterrows():
+        question = _clean_value(row.get("question"))
+        ground_truth = _clean_value(row.get("reference_answer"))
+        if not question or not ground_truth:
+            continue
+
+        metadata = {
+            column: _clean_value(row.get(column))
+            for column in CSV_METADATA_COLUMNS
+            if column in df.columns
+        }
+        expected_context = " | ".join(
+            value
+            for value in [
+                metadata.get("article_id", ""),
+                metadata.get("article_title", ""),
+                metadata.get("category", ""),
+                metadata.get("section", ""),
+                ground_truth,
+            ]
+            if value
+        )
+
+        test_cases.append(
+            {
+                "question": question,
+                "ground_truth": ground_truth,
+                "contexts": [expected_context] if expected_context else [],
+                "metadata": {
+                    "source_row": int(index) + 2,
+                    **metadata,
+                },
+            }
+        )
+
+    return test_cases
+
+
+def write_test_cases_json(test_cases: list[dict], path: str | Path) -> None:
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8") as f:
+        json.dump({"test_cases": test_cases}, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+
+
+def load_test_cases(path: str | Path) -> list[dict]:
+    dataset_path = Path(path)
+    if dataset_path.suffix.lower() == ".csv":
+        return csv_to_test_cases(dataset_path)
+
+    with dataset_path.open("r", encoding="utf-8-sig") as f:
         data = json.load(f)
     return data["test_cases"]
 
 
-def query_rag_api(api_url: str, question: str, timeout: int = 120) -> dict:
+def query_rag_api(
+    api_url: str,
+    question: str,
+    retrieval_scope: str,
+    timeout: int = 120,
+) -> dict:
     """Call the live RAG endpoint and return {response, contexts}."""
     payload = {
         "messages": [{"role": "user", "content": question}],
         "include_contexts": True,
+        "retrieval_scope": retrieval_scope,
     }
     resp = requests.post(api_url, json=payload, timeout=timeout)
     resp.raise_for_status()
@@ -209,14 +298,23 @@ def build_eval_dataset(
 ) -> tuple[EvaluationDataset, list[dict]]:
     samples = []
     sample_metadata = []
-    for i, case in enumerate(test_cases, start=1):
+    selected_cases = test_cases[args.offset :]
+    if args.limit is not None:
+        selected_cases = selected_cases[: args.limit]
+
+    for i, case in enumerate(selected_cases, start=1):
         question = case["question"]
         ground_truth = case.get("ground_truth", "")
 
-        logger.info(f"[{i}/{len(test_cases)}] Querying: {question[:80]}...")
+        logger.info(f"[{i}/{len(selected_cases)}] Querying: {question[:80]}...")
         try:
             start = time.perf_counter()
-            api_result = query_rag_api(args.api_url, question)
+            api_result = query_rag_api(
+                args.api_url,
+                question,
+                retrieval_scope=args.retrieval_scope,
+                timeout=args.api_timeout,
+            )
             elapsed = time.perf_counter() - start
             logger.info(f"  API response received in {elapsed:.2f}s")
         except requests.RequestException as e:
@@ -242,12 +340,14 @@ def build_eval_dataset(
         )
         sample_metadata.append(
             {
-                "query_id": i,
+                "query_id": args.offset + i,
                 "api_latency_seconds": elapsed,
                 "retrieved_context_count": len(retrieved_contexts),
                 "expected_context_count": len(expected_contexts),
                 "max_eval_contexts": args.max_eval_contexts,
                 "max_eval_context_chars": args.max_eval_context_chars,
+                "retrieval_scope": args.retrieval_scope,
+                **case.get("metadata", {}),
             }
         )
 
@@ -277,7 +377,7 @@ def add_derived_correctness(df, metric_cols: list[str], threshold: float):
 
 
 def main():
-    dataset_path = Path(__file__).parent / "datasets" / "goldens.json"
+    dataset_path = Path(__file__).parent / "datasets" / "ML4EHR.csv"
     results_path = Path(__file__).parent / "results_v2" / "ragas_results_llama_3_1_8b.csv"
 
     parser = argparse.ArgumentParser(
@@ -294,7 +394,19 @@ def main():
     )
 
     parser.add_argument(
-        "--dataset", default=dataset_path, help="Path to test_cases.json"
+        "--dataset",
+        default=dataset_path,
+        help="Path to a test_cases JSON file or ML4EHR-style CSV file",
+    )
+    parser.add_argument(
+        "--write-json-dataset",
+        default=None,
+        help="Optional path where the converted test_cases JSON should be written",
+    )
+    parser.add_argument(
+        "--convert-only",
+        action="store_true",
+        help="Convert --dataset to JSON and exit. Requires --write-json-dataset.",
     )
     parser.add_argument(
         "--output",
@@ -305,6 +417,18 @@ def main():
         "--api-url",
         default="http://localhost:8001/api/v1/rag/local",
         help="Full URL of the RAG chat endpoint",
+    )
+    parser.add_argument(
+        "--api-timeout",
+        type=int,
+        default=120,
+        help="Timeout in seconds for each RAG API request",
+    )
+    parser.add_argument(
+        "--retrieval-scope",
+        choices=["all_papers", "relevant_papers", "specific_paper"],
+        default="all_papers",
+        help="Retrieval scope to send to the RAG chat endpoint",
     )
 
     parser.add_argument(
@@ -352,6 +476,18 @@ def main():
         help="Raise RAGAS exceptions instead of recording failed metric calls as NaN",
     )
     parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Maximum number of dataset rows to evaluate",
+    )
+    parser.add_argument(
+        "--offset",
+        type=int,
+        default=0,
+        help="Number of dataset rows to skip before evaluation",
+    )
+    parser.add_argument(
         "--correctness-threshold",
         type=float,
         default=0.75,
@@ -373,6 +509,12 @@ def main():
     )
     args = parser.parse_args()
 
+    if args.convert_only and not args.write_json_dataset:
+        parser.error("--convert-only requires --write-json-dataset")
+    if args.limit is not None and args.limit < 1:
+        parser.error("--limit must be greater than 0")
+    if args.offset < 0:
+        parser.error("--offset cannot be negative")
     if not 0 <= args.correctness_threshold <= 1:
         parser.error("--correctness-threshold must be between 0 and 1")
     missing_correctness_metrics = set(args.correctness_metrics) - set(args.metrics)
@@ -385,6 +527,12 @@ def main():
     logger.info(f"Loading dataset from {args.dataset}...")
     test_cases = load_test_cases(args.dataset)
     logger.info(f"Loaded {len(test_cases)} test cases.\n")
+
+    if args.write_json_dataset:
+        write_test_cases_json(test_cases, args.write_json_dataset)
+        logger.info(f"Converted dataset saved to {Path(args.write_json_dataset).absolute()}")
+    if args.convert_only:
+        return
 
     logger.info("Querying live API for each question...")
     eval_dataset, sample_metadata = build_eval_dataset(test_cases, args)

@@ -1,10 +1,26 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
-import { useAppStore, type SourceDocument } from "@/lib/store"
+import type { ReactNode } from "react"
+import { useAppStore, type RetrievalScope, type SourceDocument } from "@/lib/store"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import {
   Send,
   Square,
@@ -13,11 +29,22 @@ import {
   Sparkles,
   FileText,
   Link,
-  ChevronDown
+  ChevronDown,
+  Search,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "/api/v1"
+
+const RETRIEVAL_SCOPE_OPTIONS: Array<{ value: RetrievalScope; label: string }> = [
+  { value: "relevant_papers", label: "Relevant papers" },
+  { value: "all_papers", label: "All indexed papers" },
+  { value: "specific_paper", label: "Specific paper" },
+]
+
+function getRetrievalScopeLabel(scope?: RetrievalScope | null) {
+  return RETRIEVAL_SCOPE_OPTIONS.find((option) => option.value === scope)?.label
+}
 
 function replaceArticleTitlePlaceholder(content: string, sources?: SourceDocument[]) {
   const articleTitle = sources?.[0]?.title?.trim()
@@ -37,12 +64,210 @@ function formatSourceScore(score?: number | null) {
   return `${Math.round(boundedScore * 100)}%`
 }
 
-function MessageBubble({ message }: { message: { role: 'user' | 'assistant'; content: string; timestamp: Date; sources?: SourceDocument[] } }) {
+function splitMarkdownTableRow(line: string) {
+  const trimmed = line.trim().replace(/^\|/, "").replace(/\|$/, "")
+  const cells: string[] = []
+  let current = ""
+  let escaped = false
+
+  for (const character of trimmed) {
+    if (escaped) {
+      current += character
+      escaped = false
+      continue
+    }
+    if (character === "\\") {
+      escaped = true
+      continue
+    }
+    if (character === "|") {
+      cells.push(current.trim())
+      current = ""
+      continue
+    }
+    current += character
+  }
+  cells.push(current.trim())
+
+  return cells
+}
+
+function isMarkdownTableSeparator(line: string) {
+  const cells = splitMarkdownTableRow(line)
+  return cells.length > 1 && cells.every((cell) => /^:?-{3,}:?$/.test(cell))
+}
+
+function hasMarkdownTable(content: string) {
+  const lines = content.split("\n")
+  return lines.some((line, index) => line.includes("|") && isMarkdownTableSeparator(lines[index + 1] ?? ""))
+}
+
+function renderInlineMarkdown(value: string) {
+  const segments: ReactNode[] = []
+  const linkPattern = /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+
+  while ((match = linkPattern.exec(value)) !== null) {
+    if (match.index > lastIndex) {
+      segments.push(value.slice(lastIndex, match.index))
+    }
+    segments.push(
+      <a
+        key={`${match[2]}-${match.index}`}
+        href={match[2]}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="font-medium text-primary underline-offset-2 hover:underline"
+      >
+        {match[1].replace(/\\([\[\]])/g, "$1")}
+      </a>
+    )
+    lastIndex = match.index + match[0].length
+  }
+
+  if (lastIndex < value.length) {
+    segments.push(value.slice(lastIndex))
+  }
+
+  return segments
+}
+
+function renderCellText(value: string) {
+  return value.split(/<br\s*\/?>/i).map((part, index, parts) => (
+    <span key={`${part}-${index}`}>
+      {renderInlineMarkdown(part)}
+      {index < parts.length - 1 && <br />}
+    </span>
+  ))
+}
+
+function getTableColumnClass(headers: string[], columnIndex: number) {
+  const header = headers[columnIndex]?.trim().toLowerCase()
+  if (header === "answer") {
+    return "min-w-[28rem] max-w-[44rem] md:w-[55%]"
+  }
+  if (header === "paper") {
+    return "min-w-48 max-w-72"
+  }
+  return "min-w-36 max-w-80"
+}
+
+function MarkdownMessageContent({ content }: { content: string }) {
+  const lines = content.split("\n")
+  const blocks: Array<
+    | { type: "text"; value: string }
+    | { type: "table"; headers: string[]; rows: string[][] }
+  > = []
+
+  let textBuffer: string[] = []
+  let index = 0
+
+  const flushText = () => {
+    const value = textBuffer.join("\n").trim()
+    if (value) {
+      blocks.push({ type: "text", value })
+    }
+    textBuffer = []
+  }
+
+  while (index < lines.length) {
+    const current = lines[index]
+    const next = lines[index + 1]
+    if (
+      current?.includes("|") &&
+      next &&
+      isMarkdownTableSeparator(next)
+    ) {
+      flushText()
+      const headers = splitMarkdownTableRow(current)
+      const rows: string[][] = []
+      index += 2
+
+      while (index < lines.length && lines[index].includes("|")) {
+        const row = splitMarkdownTableRow(lines[index])
+        if (row.length === headers.length) {
+          rows.push(row)
+          index += 1
+          continue
+        }
+        break
+      }
+
+      blocks.push({ type: "table", headers, rows })
+      continue
+    }
+
+    textBuffer.push(current)
+    index += 1
+  }
+  flushText()
+
+  return (
+    <div className="space-y-3 text-sm leading-relaxed">
+      {blocks.map((block, blockIndex) => {
+        if (block.type === "text") {
+          return (
+            <p key={`text-${blockIndex}`} className="whitespace-pre-wrap">
+              {block.value}
+            </p>
+          )
+        }
+
+        return (
+          <div
+            key={`table-${blockIndex}`}
+            className="w-full max-w-full overflow-x-auto rounded-md border border-border/60 bg-background/40"
+          >
+            <Table className="min-w-[72rem]">
+              <TableHeader>
+                <TableRow>
+                  {block.headers.map((header, headerIndex) => (
+                    <TableHead
+                      key={`${header}-${headerIndex}`}
+                      className={cn(
+                        "h-9 bg-muted/70 px-3 text-xs font-semibold whitespace-normal",
+                        getTableColumnClass(block.headers, headerIndex),
+                      )}
+                    >
+                      {header}
+                    </TableHead>
+                  ))}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {block.rows.map((row, rowIndex) => (
+                  <TableRow key={`row-${rowIndex}`}>
+                    {row.map((cell, cellIndex) => (
+                      <TableCell
+                        key={`cell-${rowIndex}-${cellIndex}`}
+                        className={cn(
+                          "px-3 py-2 align-top text-xs whitespace-normal",
+                          getTableColumnClass(block.headers, cellIndex),
+                        )}
+                      >
+                        {renderCellText(cell)}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function MessageBubble({ message }: { message: { role: 'user' | 'assistant'; content: string; timestamp: Date; sources?: SourceDocument[]; retrievalScope?: RetrievalScope } }) {
   const [sourceExpanded, setSourceExpanded] = useState(false)
   const isUser = message.role === 'user'
   const hasSources = !isUser && message.sources && message.sources.length > 0
   const displayContent = isUser ? message.content : replaceArticleTitlePlaceholder(message.content, message.sources)
+  const hasTable = !isUser && hasMarkdownTable(displayContent)
   const shouldScrollSources = (message.sources?.length ?? 0) > 5
+  const retrievalScopeLabel = !isUser ? getRetrievalScopeLabel(message.retrievalScope) : null
 
   return (
     <div className={cn("flex gap-3", isUser && "flex-row-reverse")}>
@@ -57,7 +282,8 @@ function MessageBubble({ message }: { message: { role: 'user' | 'assistant'; con
         )}
       </div>
       <div className={cn(
-        "flex flex-col gap-1 max-w-[80%]",
+        "flex flex-col gap-1",
+        hasTable ? "w-full max-w-[calc(100%-2.75rem)]" : "max-w-[80%]",
         isUser && "items-end"
       )}>
         <div className={cn(
@@ -66,7 +292,13 @@ function MessageBubble({ message }: { message: { role: 'user' | 'assistant'; con
             ? "bg-primary text-primary-foreground rounded-tr-sm"
             : "bg-muted text-foreground rounded-tl-sm"
         )}>
-          <p className="text-sm whitespace-pre-wrap leading-relaxed">{displayContent}</p>
+          <MarkdownMessageContent content={displayContent} />
+          {retrievalScopeLabel && (
+            <Badge variant="outline" className="mt-3 text-xs">
+              <Search className="h-3 w-3 mr-1" />
+              {retrievalScopeLabel}
+            </Badge>
+          )}
           {hasSources && (
             <div className="mt-3 border-t border-border/50 pt-3">
               <button
@@ -174,6 +406,8 @@ export function ChatInterface() {
     temperature,
     maxTokens,
     topP,
+    retrievalScope,
+    setRetrievalScope,
   } = useAppStore()
 
   const hasModel = selectedChatModel || (useHostedModels && hostedModelName)
@@ -196,9 +430,18 @@ export function ChatInterface() {
     }
   }, [input])
 
-  const streamAssistantMessage = (messageId: string, fullText: string, sources?: SourceDocument[]) => {
+  const streamAssistantMessage = (
+    messageId: string,
+    fullText: string,
+    sources?: SourceDocument[],
+    responseRetrievalScope?: RetrievalScope,
+  ) => {
     if (!fullText) {
-      updateMessage(messageId, { content: "No response received.", sources })
+      updateMessage(messageId, {
+        content: "No response received.",
+        sources,
+        retrievalScope: responseRetrievalScope,
+      })
       return
     }
 
@@ -206,7 +449,11 @@ export function ChatInterface() {
     const chunkSize = 6
     const timer = setInterval(() => {
       index = Math.min(fullText.length, index + chunkSize)
-      updateMessage(messageId, { content: fullText.slice(0, index), sources })
+      updateMessage(messageId, {
+        content: fullText.slice(0, index),
+        sources,
+        retrievalScope: responseRetrievalScope,
+      })
       if (index >= fullText.length) {
         clearInterval(timer)
         setIsGenerating(false)
@@ -259,6 +506,7 @@ export function ChatInterface() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           messages: requestMessages,
+          retrieval_scope: retrievalScope,
           temperature,
           max_tokens: maxTokens,
           top_p: topP,
@@ -273,7 +521,12 @@ export function ChatInterface() {
 
       const data = await response.json()
       didStream = true
-      streamAssistantMessage(assistantMessageId, data.response ?? "", data.source_documents ?? [])
+      streamAssistantMessage(
+        assistantMessageId,
+        data.response ?? "",
+        data.source_documents ?? [],
+        data.retrieval_scope ?? retrievalScope,
+      )
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         return
@@ -295,6 +548,13 @@ export function ChatInterface() {
   const handleStop = () => {
     abortRef.current?.abort()
     setIsGenerating(false)
+  }
+
+  const handleRetrievalScopeChange = (value: string) => {
+    setRetrievalScope(value as RetrievalScope)
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus()
+    })
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -342,6 +602,28 @@ export function ChatInterface() {
 
       {/* Input Area */}
       <div className="border-t border-border p-4 bg-background shrink-0">
+        <div className="mb-3 flex items-center gap-2">
+          <span className="text-xs font-medium text-muted-foreground">
+            Search scope
+          </span>
+          <Select
+            value={retrievalScope}
+            onValueChange={handleRetrievalScopeChange}
+            disabled={isGenerating}
+          >
+            <SelectTrigger size="sm" className="w-[190px]">
+              <Search className="h-3.5 w-3.5" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {RETRIEVAL_SCOPE_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
         <div className="flex gap-2 items-end w-full">
           <div className="flex-1 relative">
             <Textarea

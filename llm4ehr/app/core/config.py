@@ -35,6 +35,7 @@ class Config:
     # Ollam configuration
     OLLAMA_URL = os.getenv("OLLAMA_URL", "http://ollama:11434")
     MAX_MODEL_SIZE: int = 4 * 1024**3  # e.g. "7B", "13B", "70B"
+    OLLAMA_NUM_CTX: int = int(os.getenv("OLLAMA_NUM_CTX", "16384"))  # e.g. 16384
 
     # sqlite configuration
     SQLITE_DB_PATH = os.getenv("SQLITE_DB_PATH", "sqlite:////app/data/papers.db")

@@ -555,7 +555,49 @@ llama3.2:3b, qwen2.5:3b (1.9GB), gemma3:1b(1.2GB), qwen3:3b (2.1GB), phi4-mini:3
 
 ---
 
+## 2026-08-01
+- Updated `system_prompt.py` 
+  - My previous system prompt was not clear and confused the LLM since I was mixing the instructions for explicit paper queries and general queries
+  - In the updated system prompt, I have clearly separated all paper prompt, relevant paper prompt and general prompt.
+- Updated `qdrant_client.py` to include a new method `get_all_article_ids()` which retrieves all the unique article ids from the vector database for general queries where we want to retrieve relevant chunks from all papers in the corpus.
+- Updated the `retrieval_schema.py`
+  - Defined `RetrievalScope` enum to specify the scope of the retrieval (e.g., ALL, SPECIFIC_PAPER, etc.)
+  - Added `retrieval_scope` and `article_id` fields to the `QueryRequest` to be able to specify the scope of the retrieval 
+- Updated `chat_schema.py` 
+  - Added `retrieval_scope` to the `ChatRequest` and `ChatResponse` to allow users to specify the scope of the retrieval when asking questions.
+- Updated `retrieval_service.py` 
+  - Initially the retrieval service was only able to handle queries that either mentioned a specific paper title or general queries. But the general queries were not able to retrieve relevant chunks from each paper and were only able to retrieve chunks from a few papers. It was only returning a limited number of chunks (top 50) from the entire corpus and then grouping them by article to select the top 5 papers. This approach was not ideal for general queries as it could exclude relevant chunks from other papers. 
+  - Now in the updated retrieval service:
+    -  `_retrieve_across_all_papers` method first retrieves all article ids from the vector db.
+      -  Loop through each article id and does the hybrid search for each article id to retrieve relevant chunks from each paper.
+        - `_prepare_chunk_candidates()` takes the search results from each paper and a dictionary of payload, score
+        -  each chunk candidate is then re-ranked
+        -  then for each paper's re-ranked chunks, only the top 50 chunks is added to the `candidates_by_article` dictionary that store the re-ranked chunks for each paper.
+      - After that `_build_response_from_grouped_chunks()` method is called to merge the top chunks from each paper and prepare the final response for the LLM.
+        - For each article id and chunks in the candidates by article dictionary, the `llm_docs` is prepared by taking only `max_chunks_per_article` (top 2 for now) and merging them to prepare section-wise merged text.
+        - It returns a `RetrievedDocument` object for each paper with the merged text and metadata.
+- Updated the `pipeline.py` 
+  - The `ChatResponse` and the `QueryRequest` now includes the `retrieval_scope` field to indicate whether the response was generated from a specific paper or across all papers in the corpus.
+  - To improve the UI experience, the `_markdown_table_cell()` creates a markdown table cell for each source to create a table of source documents in the response. This allows the user to easily see which papers were used as sources for the response and provides a clear reference for further reading or verification of the information provided by the LLM.
+
+
+
 ## Meeting with supervisor
+
+- Until which layer does the search happens in case of dense search and sparse search? Is it happening in the embedding layer or the vector database layer?
+- Clearly describe what we are able to achieve in the project.
+  - Specific list of questions to each individual paper : the output should be a table with the question, answer, and source document
+    - Ex: does the paper address ICU or Non-ICU patients? Ans: For each paper, the answer should be whether it addresses ICU or Non-ICU patients and the source document should be the paper name.
+    - Improve validation
+      - Extract ground truth from at least 10 papers
+      - Formulate a list of questions to ask to all the papers and get the answers in a structured format
+      - First check what questions performed poorly and try to understand : either the question isn't formatted well or the ground truth is not provided properly.  
+        - Either remove the questions or reformat the questions and re-evaluate the RAG pipeline 
+        - Adjust ground truth or format the questions 
+      
+  - Should be able to query across all the papers (or selected papers) and get the answer with the source document
+    - Ex: What papers address neutropenic fever? Ans: These three paper addresses neutropenic fever and the source documents should be the paper names.
+    
 
 - domain specific llm model vs general llm model
 - [x] include tables from the paper as well
