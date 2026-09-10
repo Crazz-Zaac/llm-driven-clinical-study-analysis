@@ -54,7 +54,9 @@ class IndexingService:
                 if not chunk_texts:
                     continue
 
-                dense_embeddings = self.embedder.embed_dense(chunk_texts, show_timing=False)
+                dense_embeddings = self.embedder.embed_dense(
+                    chunk_texts, show_timing=False
+                )
                 sparse_embeddings = self.embedder.embed_sparse_batch(chunk_texts)
 
                 for i, (chunk_text, dense, sparse) in enumerate(

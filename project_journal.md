@@ -6,6 +6,7 @@
 - Generating **requirements.txt** from poetry: `poetry export -f requirements.txt --output requirements.txt --without-hashes`
 - Add package to poetry only for evaluation (for example): `poetry add -G evaluation streamlit`
 - Testing scripts: `PYTHONPATH=. python tests/embedding_test.py`
+- Running RAGAs evaluation script: `python evaluate_rag.py --api-timeout 0 --judge-timeout 1200 --dataset datasets/ML4EHR.json --retrieval-scope all_papers --judge-model qwen2.5:7b --output results_v3/llama_3_2_1b__qwen2_5_7b.csv`
 ---
 
 # Project History

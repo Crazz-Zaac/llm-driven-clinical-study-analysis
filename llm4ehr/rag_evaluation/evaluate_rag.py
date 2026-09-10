@@ -1,5 +1,7 @@
 import argparse
+import csv
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -10,25 +12,8 @@ import warnings
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-import pandas as pd
 from loguru import logger
 import requests
-from ragas import evaluate
-from ragas import EvaluationDataset, SingleTurnSample
-from ragas.run_config import RunConfig
-
-from openai import OpenAI
-from ragas.llms import llm_factory
-
-# Use LangChain's native embeddings component directly to satisfy the legacy metric loop
-from langchain_ollama import OllamaEmbeddings
-
-from ragas.metrics import (
-    Faithfulness,  # measures whether LLM's response is faithful to the retrieved contexts
-    AnswerRelevancy,  # measures whether LLM's response is relevant to the user's question
-    ContextRecall,  # measures whether the retrieved contexts contain the answer to the user's question
-    LLMContextPrecisionWithReference,  # measures whether the retrieved contexts are relevant to the user's question and the LLM's response
-)
 
 CSV_METADATA_COLUMNS = [
     "article_id",
@@ -51,6 +36,10 @@ DEFAULT_CORRECTNESS_METRICS = [
     "answer_relevancy",
     "context_recall",
 ]
+
+MISSING_PAPER_RESPONSE = "MISSING_RESPONSE_FOR_THIS_PAPER"
+DEFAULT_OPENAI_JUDGE_MODEL = "gpt-5.6-luna"
+APP_ENV_PATH = Path(__file__).resolve().parents[1] / "app" / ".env"
 
 
 def get_active_ollama_models(model_info_url: str) -> dict:
@@ -123,24 +112,32 @@ def validate_judge_model_available(
 
 
 def build_judge(args):
+    from openai import OpenAI
+    from ragas.llms import llm_factory
+    from dotenv import load_dotenv
+
+    # Use LangChain's native embeddings component directly to satisfy the legacy metric loop
+    from langchain_ollama import OllamaEmbeddings
+
+    load_dotenv(APP_ENV_PATH, override=False)
+    openai_api_key = os.environ.get("OPENAI_API_KEY")
+    if not openai_api_key:
+        raise RuntimeError(
+            f"OPENAI_API_KEY is not set. Add it to {APP_ENV_PATH} or export it "
+            "before running the evaluator."
+        )
+
     models = get_active_ollama_models(args.model_info_url)
     active_chat_model = models["chat_model"]
-    judge_model = args.judge_model or active_chat_model
+    judge_model = args.judge_model
     embedding_model = models["embedding_model"]
-
-    validate_judge_model_available(
-        judge_model,
-        args.model_info_url,
-        args.ollama_base_url,
-    )
 
     logger.info(f"Active chat model: {active_chat_model}")
     logger.info(f"Judge LLM: {judge_model}")
     logger.info(f"Judge Embeddings: {embedding_model}")
 
     openai_client = OpenAI(
-        api_key="ollama",
-        base_url=f"{args.ollama_base_url}/v1",
+        api_key=openai_api_key,
         timeout=args.judge_timeout,
     )
 
@@ -155,8 +152,7 @@ def build_judge(args):
                     "content": "Reply with exactly: OK",
                 }
             ],
-            max_tokens=16,
-            temperature=0,
+            max_completion_tokens=16,
         )
         elapsed = time.perf_counter() - start
         logger.info(f"  Judge preflight completed in {elapsed:.2f}s")
@@ -166,11 +162,12 @@ def build_judge(args):
         client=openai_client,
     )
 
-    # Force max_tokens configuration adjustments on the raw model dictionary
-    # to eliminate the IncompleteOutputException
-    llm.model_args["max_tokens"] = 2048
-    # defines the randomness of the output; 0 means deterministic output
-    llm.model_args["temperature"] = 0
+    # Newer OpenAI models reject the legacy Chat Completions `max_tokens`
+    # field. RAGAS defaults include it, so replace it explicitly.
+    llm.model_args.pop("max_tokens", None)
+    llm.model_args.pop("temperature", None)
+    llm.model_args.pop("top_p", None)
+    llm.model_args["max_completion_tokens"] = 8192
 
     # Passing raw LangChain objects matches the legacy namespace metric signature requirements perfectly
     embeddings = OllamaEmbeddings(
@@ -182,65 +179,267 @@ def build_judge(args):
 
 
 def _clean_value(value) -> str:
-    if value is None or pd.isna(value):
+    if value is None:
         return ""
     return str(value).strip()
 
 
 def csv_to_test_cases(path: str | Path) -> list[dict]:
-    """Convert the ML4EHR CSV into the JSON shape consumed by this evaluator."""
-    df = pd.read_csv(path, encoding="utf-8-sig")
-    df = df.loc[:, [col for col in df.columns if not str(col).startswith("Unnamed")]]
-    df = df.dropna(how="all")
+    """Convert the ML4EHR CSV into all-papers evaluation cases.
 
-    for col in ["article_id", "article_title", "field_id"]:
-        if col in df.columns:
-            df[col] = df[col].ffill()
+    The source CSV is one row per paper/question answer. For all-papers RAG,
+    the system receives each question once and should answer across papers, so
+    each JSON case groups all paper-specific reference answers for a category.
+    """
+    rows = []
+    carry_forward = {
+        "article_id": "",
+        "article_title": "",
+        "field_id": "",
+    }
+    with Path(path).open("r", encoding="utf-8-sig", newline="") as f:
+        reader = csv.DictReader(f)
+        fieldnames = [
+            fieldname
+            for fieldname in (reader.fieldnames or [])
+            if fieldname and not fieldname.startswith("Unnamed")
+        ]
+
+        for source_index, row in enumerate(reader, start=2):
+            cleaned_row = {
+                fieldname: _clean_value(row.get(fieldname))
+                for fieldname in fieldnames
+            }
+            if not any(cleaned_row.values()):
+                continue
+
+            for col in carry_forward:
+                if cleaned_row.get(col):
+                    carry_forward[col] = cleaned_row[col]
+                else:
+                    cleaned_row[col] = carry_forward[col]
+
+            cleaned_row["source_row"] = source_index
+            rows.append(cleaned_row)
 
     required_cols = {"question", "reference_answer"}
-    missing_cols = sorted(required_cols - set(df.columns))
+    available_cols = set(rows[0].keys()) if rows else set()
+    missing_cols = sorted(required_cols - available_cols)
     if missing_cols:
         raise ValueError(
             f"CSV dataset is missing required column(s): {', '.join(missing_cols)}"
         )
 
     test_cases = []
-    for index, row in df.iterrows():
-        question = _clean_value(row.get("question"))
-        ground_truth = _clean_value(row.get("reference_answer"))
-        if not question or not ground_truth:
+    grouped_rows: dict[str, list[dict]] = {}
+    for row in rows:
+        if not _clean_value(row.get("question")) or not _clean_value(
+            row.get("reference_answer")
+        ):
             continue
 
-        metadata = {
-            column: _clean_value(row.get(column))
-            for column in CSV_METADATA_COLUMNS
-            if column in df.columns
-        }
-        expected_context = " | ".join(
-            value
-            for value in [
-                metadata.get("article_id", ""),
-                metadata.get("article_title", ""),
-                metadata.get("category", ""),
-                metadata.get("section", ""),
-                ground_truth,
-            ]
-            if value
-        )
+        category = _clean_value(row.get("category"))
+        question_key = category or _clean_value(row.get("question"))
+        grouped_rows.setdefault(question_key, []).append(row)
 
+    for query_id, (question_key, rows) in enumerate(grouped_rows.items(), start=1):
+        first_row = rows[0]
+        question = _clean_value(first_row.get("question"))
+        category = _clean_value(first_row.get("category"))
+        field_id = _clean_value(first_row.get("field_id"))
+        references = []
+
+        for row in rows:
+            reference = {
+                "article_id": _clean_value(row.get("article_id")),
+                "article_title": _clean_value(row.get("article_title")),
+                "section": _clean_value(row.get("section")),
+                "status": _clean_value(row.get("status")),
+                "answer": _clean_value(row.get("reference_answer")),
+                "source_row": int(row.get("source_row")),
+            }
+            references.append(reference)
+
+        ground_truth = format_references_for_ragas(references)
         test_cases.append(
             {
+                "question_id": category or question_key,
                 "question": question,
                 "ground_truth": ground_truth,
-                "contexts": [expected_context] if expected_context else [],
+                "contexts": [ground_truth],
+                "references": references,
                 "metadata": {
-                    "source_row": int(index) + 2,
-                    **metadata,
+                    "grouped_query_id": query_id,
+                    "category": category,
+                    "field_id": field_id,
+                    "reference_count": len(references),
+                    "reference_article_ids": [
+                        reference["article_id"] for reference in references
+                    ],
                 },
             }
         )
 
     return test_cases
+
+
+def format_references_for_ragas(references: list[dict]) -> str:
+    """Render structured paper references as one RAGAS reference answer."""
+    blocks = []
+    for reference in references:
+        blocks.append(
+            "\n".join(
+                [
+                    f"Paper ID: {reference.get('article_id', '')}",
+                    f"Title: {reference.get('article_title', '')}",
+                    f"Section: {reference.get('section', '')}",
+                    f"Status: {reference.get('status', '')}",
+                    f"Answer: {reference.get('answer', '')}",
+                ]
+            )
+        )
+    return "\n\n".join(blocks)
+
+
+def get_case_reference(case: dict) -> str:
+    if case.get("ground_truth"):
+        return case["ground_truth"]
+    if case.get("references"):
+        return format_references_for_ragas(case["references"])
+    return ""
+
+
+def normalize_match_key(value: str) -> str:
+    value = re.sub(r"\[[^\]]+\]\(([^)]+)\)", r"\1", _clean_value(value))
+    value = re.sub(r"<[^>]+>", " ", value)
+    value = re.sub(r"\\([|*_`[\]()])", r"\1", value)
+    value = re.sub(r"[^a-zA-Z0-9]+", " ", value.lower())
+    return " ".join(value.split())
+
+
+def markdown_link_text(value: str) -> str:
+    match = re.search(r"\[([^\]]+)\]\([^)]+\)", value)
+    if match:
+        return match.group(1).strip()
+    return _clean_value(value)
+
+
+def extract_article_id(value: str) -> str:
+    match = re.search(r"\bs\d{4,5}-\d{3}-\d{5}-[a-z0-9]+\b", value, re.IGNORECASE)
+    return match.group(0) if match else ""
+
+
+def split_markdown_table_row(row: str) -> list[str]:
+    row = row.strip()
+    if row.startswith("|"):
+        row = row[1:]
+    if row.endswith("|"):
+        row = row[:-1]
+
+    cells = []
+    current = []
+    escaped = False
+    for char in row:
+        if escaped:
+            current.append(char)
+            escaped = False
+            continue
+        if char == "\\":
+            current.append(char)
+            escaped = True
+            continue
+        if char == "|":
+            cells.append("".join(current).strip())
+            current = []
+            continue
+        current.append(char)
+    cells.append("".join(current).strip())
+    return cells
+
+
+def is_markdown_separator(cells: list[str]) -> bool:
+    return bool(cells) and all(
+        re.fullmatch(r":?-{3,}:?", cell.strip()) for cell in cells
+    )
+
+
+def parse_response_table_by_title(response: str) -> tuple[dict[str, dict], list[dict]]:
+    """Return response table rows keyed by normalized paper title."""
+    rows_by_title = {}
+    parsed_rows = []
+    for line in _clean_value(response).splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("|"):
+            continue
+        cells = split_markdown_table_row(stripped)
+        if len(cells) < 3 or is_markdown_separator(cells):
+            continue
+        if [cell.lower() for cell in cells[:3]] == ["paper", "answer", "evidence"]:
+            continue
+
+        paper_title = markdown_link_text(cells[0])
+        row = {
+            "row_index": len(parsed_rows),
+            "paper": cells[0],
+            "article_id": extract_article_id(cells[0]),
+            "paper_title": paper_title,
+            "answer": cells[1],
+            "evidence": cells[2],
+        }
+        parsed_rows.append(row)
+        title_key = normalize_match_key(paper_title)
+        if title_key:
+            rows_by_title[title_key] = row
+
+    return rows_by_title, parsed_rows
+
+
+def find_response_row_for_reference(
+    reference: dict,
+    response_rows_by_title: dict[str, dict],
+    response_rows: list[dict],
+) -> dict | None:
+    reference_title_key = normalize_match_key(reference.get("article_title", ""))
+    response_row = response_rows_by_title.get(reference_title_key)
+    if response_row:
+        return response_row
+
+    for row in response_rows:
+        response_title_key = normalize_match_key(row.get("paper_title", ""))
+        if (
+            reference_title_key
+            and response_title_key
+            and (
+                reference_title_key in response_title_key
+                or response_title_key in reference_title_key
+            )
+        ):
+            return row
+
+    reference_article_id = normalize_match_key(reference.get("article_id", ""))
+    for row in response_rows:
+        response_article_id = normalize_match_key(row.get("article_id", ""))
+        if reference_article_id and reference_article_id == response_article_id:
+            return row
+
+    return None
+
+
+def context_matches_reference(context: str, reference: dict) -> bool:
+    context_key = normalize_match_key(context)
+    article_id = normalize_match_key(reference.get("article_id", ""))
+    title = normalize_match_key(reference.get("article_title", ""))
+    return bool(
+        (article_id and article_id in context_key)
+        or (title and title in context_key)
+    )
+
+
+def contexts_for_reference(contexts: list[str], reference: dict) -> list[str]:
+    matching_contexts = [
+        context for context in contexts if context_matches_reference(context, reference)
+    ]
+    return matching_contexts or contexts
 
 
 def write_test_cases_json(test_cases: list[dict], path: str | Path) -> None:
@@ -265,7 +464,7 @@ def query_rag_api(
     api_url: str,
     question: str,
     retrieval_scope: str,
-    timeout: int = 120,
+    timeout: int | None = 120,
 ) -> dict:
     """Call the live RAG endpoint and return {response, contexts}."""
     payload = {
@@ -295,7 +494,9 @@ def limit_contexts(
 def build_eval_dataset(
     test_cases: list[dict],
     args,
-) -> tuple[EvaluationDataset, list[dict]]:
+) -> tuple[object, list[dict]]:
+    from ragas import EvaluationDataset, SingleTurnSample
+
     samples = []
     sample_metadata = []
     selected_cases = test_cases[args.offset :]
@@ -304,7 +505,10 @@ def build_eval_dataset(
 
     for i, case in enumerate(selected_cases, start=1):
         question = case["question"]
-        ground_truth = case.get("ground_truth", "")
+        ground_truth = get_case_reference(case)
+        references = case.get("references") or []
+        metadata = case.get("metadata", {})
+        query_id = args.offset + i
 
         logger.info(f"[{i}/{len(selected_cases)}] Querying: {question[:80]}...")
         try:
@@ -323,12 +527,97 @@ def build_eval_dataset(
 
         answer = api_result.get("response", "")
         retrieved_contexts = api_result.get("contexts") or []
+        expected_contexts = case.get("contexts") or []
+
+        if args.retrieval_scope == "all_papers" and references:
+            response_rows_by_title, response_rows = parse_response_table_by_title(answer)
+            matched_response_indexes = set()
+
+            for paper_index, reference in enumerate(references, start=1):
+                response_row = find_response_row_for_reference(
+                    reference,
+                    response_rows_by_title,
+                    response_rows,
+                )
+                if response_row:
+                    matched_response_indexes.add(response_row["row_index"])
+
+                paper_response = (
+                    response_row["answer"] if response_row else MISSING_PAPER_RESPONSE
+                )
+                paper_contexts = contexts_for_reference(retrieved_contexts, reference)
+                paper_contexts = limit_contexts(
+                    paper_contexts,
+                    args.max_eval_contexts,
+                    args.max_eval_context_chars,
+                )
+                paper_reference = reference.get("answer", "")
+                paper_title = reference.get("article_title", "")
+                paper_question = (
+                    f"{question}\n\nEvaluate only this paper: {paper_title}"
+                ).strip()
+
+                samples.append(
+                    SingleTurnSample(
+                        user_input=paper_question,
+                        response=paper_response,
+                        retrieved_contexts=paper_contexts,
+                        reference=paper_reference,
+                    )
+                )
+                sample_metadata.append(
+                    {
+                        "query_id": query_id,
+                        "eval_unit": "paper",
+                        "paper_index": paper_index,
+                        "article_id": reference.get("article_id", ""),
+                        "article_title": paper_title,
+                        "reference_section": reference.get("section", ""),
+                        "reference_status": reference.get("status", ""),
+                        "source_row": reference.get("source_row", ""),
+                        "api_latency_seconds": elapsed,
+                        "retrieved_context_count": len(paper_contexts),
+                        "expected_context_count": 1,
+                        "max_eval_contexts": args.max_eval_contexts,
+                        "max_eval_context_chars": args.max_eval_context_chars,
+                        "retrieval_scope": args.retrieval_scope,
+                        "response_paper_count": len(response_rows),
+                        "response_paper_titles": [
+                            row["paper_title"] for row in response_rows
+                        ],
+                        "matched_response_paper": response_row is not None,
+                        **metadata,
+                    }
+                )
+
+            extra_response_titles = [
+                row["paper_title"]
+                for row in response_rows
+                if row["row_index"] not in matched_response_indexes
+            ]
+            missing_reference_titles = [
+                reference.get("article_title", "")
+                for reference in references
+                if not find_response_row_for_reference(
+                    reference,
+                    response_rows_by_title,
+                    response_rows,
+                )
+            ]
+            for metadata_row in sample_metadata[-len(references) :]:
+                metadata_row["missing_paper_count"] = len(missing_reference_titles)
+                metadata_row["missing_paper_titles"] = missing_reference_titles
+                metadata_row["extra_paper_count"] = len(extra_response_titles)
+                metadata_row["extra_paper_titles"] = extra_response_titles
+
+            time.sleep(0.2)
+            continue
+
         retrieved_contexts = limit_contexts(
             retrieved_contexts,
             args.max_eval_contexts,
             args.max_eval_context_chars,
         )
-        expected_contexts = case.get("contexts") or []
 
         samples.append(
             SingleTurnSample(
@@ -340,14 +629,15 @@ def build_eval_dataset(
         )
         sample_metadata.append(
             {
-                "query_id": args.offset + i,
+                "query_id": query_id,
+                "eval_unit": "query",
                 "api_latency_seconds": elapsed,
                 "retrieved_context_count": len(retrieved_contexts),
                 "expected_context_count": len(expected_contexts),
                 "max_eval_contexts": args.max_eval_contexts,
                 "max_eval_context_chars": args.max_eval_context_chars,
                 "retrieval_scope": args.retrieval_scope,
-                **case.get("metadata", {}),
+                **metadata,
             }
         )
 
@@ -376,6 +666,56 @@ def add_derived_correctness(df, metric_cols: list[str], threshold: float):
     return df
 
 
+def add_query_level_correctness(df):
+    if "eval_unit" not in df.columns or "query_id" not in df.columns:
+        return df
+
+    paper_df = df[df["eval_unit"] == "paper"]
+    if paper_df.empty:
+        return df
+
+    df = df.copy()
+    query_summaries = {}
+    for query_id, group in paper_df.groupby("query_id", dropna=False):
+        missing_paper_count = int(group["missing_paper_count"].max())
+        extra_paper_count = int(group["extra_paper_count"].max())
+        paper_total_count = int(len(group))
+        paper_pass_count = int(group["is_correct"].sum())
+        paper_accuracy = paper_pass_count / paper_total_count if paper_total_count else 0
+        min_paper_correctness = group["correctness_score"].min(skipna=False)
+        all_papers_correct = (
+            missing_paper_count == 0
+            and extra_paper_count == 0
+            and paper_total_count > 0
+            and bool(group["is_correct"].all())
+        )
+        query_summaries[query_id] = {
+            "paper_total_count": paper_total_count,
+            "paper_pass_count": paper_pass_count,
+            "paper_accuracy": paper_accuracy,
+            "min_paper_correctness": min_paper_correctness,
+            "all_papers_correct": all_papers_correct,
+            "query_outcome": "Correct" if all_papers_correct else "Needs review",
+        }
+
+    for column in [
+        "paper_total_count",
+        "paper_pass_count",
+        "paper_accuracy",
+        "min_paper_correctness",
+        "all_papers_correct",
+        "query_outcome",
+    ]:
+        df[column] = df["query_id"].map(
+            {
+                query_id: summary[column]
+                for query_id, summary in query_summaries.items()
+            }
+        )
+
+    return df
+
+
 def main():
     dataset_path = Path(__file__).parent / "datasets" / "ML4EHR.csv"
     results_path = Path(__file__).parent / "results_v2" / "ragas_results_llama_3_1_8b.csv"
@@ -386,10 +726,10 @@ def main():
 
     parser.add_argument(
         "--judge-model",
-        default=None,
+        default=DEFAULT_OPENAI_JUDGE_MODEL,
         help=(
-            "Ollama model used as the RAGAS judge. "
-            "Defaults to the app's active chat model."
+            "OpenAI model used as the RAGAS judge. "
+            f"Defaults to {DEFAULT_OPENAI_JUDGE_MODEL}."
         ),
     )
 
@@ -421,8 +761,8 @@ def main():
     parser.add_argument(
         "--api-timeout",
         type=int,
-        default=120,
-        help="Timeout in seconds for each RAG API request",
+        default=600,
+        help="Timeout in seconds for each RAG API request. Use 0 to wait indefinitely.",
     )
     parser.add_argument(
         "--retrieval-scope",
@@ -461,8 +801,11 @@ def main():
     parser.add_argument(
         "--max-eval-contexts",
         type=int,
-        default=3,
-        help="Maximum retrieved contexts to pass into RAGAS per query",
+        default=None,
+        help=(
+            "Maximum retrieved contexts to pass into RAGAS per sample. "
+            "Defaults to no count limit. Use 0 to disable the count limit."
+        ),
     )
     parser.add_argument(
         "--max-eval-context-chars",
@@ -515,6 +858,14 @@ def main():
         parser.error("--limit must be greater than 0")
     if args.offset < 0:
         parser.error("--offset cannot be negative")
+    if args.api_timeout < 0:
+        parser.error("--api-timeout cannot be negative")
+    if args.api_timeout == 0:
+        args.api_timeout = None
+    if args.max_eval_contexts is not None and args.max_eval_contexts < 0:
+        parser.error("--max-eval-contexts cannot be negative")
+    if args.max_eval_contexts == 0:
+        args.max_eval_contexts = None
     if not 0 <= args.correctness_threshold <= 1:
         parser.error("--correctness-threshold must be between 0 and 1")
     missing_correctness_metrics = set(args.correctness_metrics) - set(args.metrics)
@@ -550,6 +901,15 @@ def main():
     # Build the judge LLM and embeddings for RAGAs evaluation
     judge_llm, judge_embeddings = build_judge(args)
 
+    from ragas import evaluate
+    from ragas.run_config import RunConfig
+    from ragas.metrics import (
+        Faithfulness,  # measures whether LLM's response is faithful to the retrieved contexts
+        AnswerRelevancy,  # measures whether LLM's response is relevant to the user's question
+        ContextRecall,  # measures whether the retrieved contexts contain the answer to the user's question
+        LLMContextPrecisionWithReference,  # measures whether the retrieved contexts are relevant to the user's question and the LLM's response
+    )
+
     metric_builders = {
         "faithfulness": lambda: Faithfulness(llm=judge_llm),
         "answer_relevancy": lambda: AnswerRelevancy(
@@ -578,6 +938,8 @@ def main():
     logger.info(result)
 
     df = result.to_pandas()
+    import pandas as pd
+
     metadata_df = pd.DataFrame(sample_metadata)
     df = pd.concat([metadata_df, df.reset_index(drop=True)], axis=1)
 
@@ -586,10 +948,11 @@ def main():
         metric_cols=args.correctness_metrics,
         threshold=args.correctness_threshold,
     )
+    df = add_query_level_correctness(df)
 
     models = get_active_ollama_models(args.model_info_url)
     df["response_model"] = models["chat_model"]
-    df["judge_model"] = args.judge_model or models["chat_model"]
+    df["judge_model"] = args.judge_model
     df["embedding_model"] = models["embedding_model"]
 
     output_path = Path(args.output)

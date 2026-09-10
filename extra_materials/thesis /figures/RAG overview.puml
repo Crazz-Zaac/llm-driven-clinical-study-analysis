@@ -1,0 +1,41 @@
+@startuml
+
+title RAG System Overview
+
+' Make diagram wider
+skinparam maxMessageSize 10
+skinparam ParticipantPadding 100
+skinparam BoxPadding 15
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+
+actor User
+participant "RAG Pipeline" as RAG
+participant "Retrieval Service" as Retrieval
+database "Qdrant\nVector Database" as Qdrant
+participant "LLM" as LLM
+participant "Structured\nOutput" as Output
+
+User -> RAG: Extraction Question
+
+RAG -> Retrieval: Query + Retrieval Scope
+note over RAG, Retrieval
+  Retrieval Scopes:
+  • Specific Paper
+  • Relevant Papers
+  • All Papers
+end note
+
+Retrieval -> Qdrant: Hybrid Search
+Qdrant --> Retrieval: Relevant Article Chunks
+
+Retrieval -> Retrieval: Rerank Retrieved Chunks
+Retrieval --> RAG: Relevant Evidence
+
+RAG -> LLM: Question + Retrieved Evidence
+LLM --> RAG: Generated Extraction
+
+RAG -> Output: Format Structured Results
+Output --> User: Answer + Supporting Evidence
+
+@enduml

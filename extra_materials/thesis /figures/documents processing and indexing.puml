@@ -1,0 +1,46 @@
+@startuml
+title Document Processing & Indexing
+
+actor User
+participant "Indexing Service" as Indexer
+database "Fetched Articles\n(JSON Files)" as Files
+participant "Text Chunker" as Chunker
+participant "Text Embedder" as Embedder
+database "Qdrant Vector DB" as Qdrant
+
+User -> Indexer: Index selected articles
+activate Indexer
+
+Indexer -> Files: Load articles by article ID
+Files --> Indexer: Article documents
+
+Indexer -> Qdrant: Create collection\n(dense + sparse vector configuration)
+Qdrant --> Indexer: Collection ready
+
+loop For each article
+    loop For each relevant section\n(Abstract, Methods, Results,\nDiscussion, Conclusion)
+        Indexer -> Chunker: Split section text into chunks
+        Chunker --> Indexer: Text chunks
+
+        Indexer -> Indexer: Enrich each chunk with\narticle title and section name
+
+        Indexer -> Embedder: Generate dense embeddings\nfor all section chunks
+        Embedder --> Indexer: Dense vectors
+
+        Indexer -> Embedder: Generate sparse BM25 embeddings\nfor all section chunks
+        Embedder --> Indexer: Sparse vectors\n(indices and weights)
+
+        loop For each chunk
+            Indexer -> Indexer: Create deterministic point ID
+            Indexer -> Indexer: Build Qdrant point\n• Dense vector\n• Sparse vector\n• Article and chunk metadata
+        end
+    end
+end
+
+Indexer -> Qdrant: Batch upsert all points
+Qdrant --> Indexer: Points indexed successfully
+
+Indexer --> User: Return indexed chunk count
+deactivate Indexer
+
+@enduml
