@@ -33,6 +33,10 @@ class ChatRequest(BaseModel):
         default=RetrievalScope.RELEVANT_PAPERS,
         description="Scope used to retrieve documents for the chat response.",
     )
+    article_id: Optional[str] = Field(
+        default=None,
+        description="Specific article ID to use when retrieval_scope is 'specific_paper'.",
+    )
     temperature: float = Field(
         default=0.7,
         ge=0.0,

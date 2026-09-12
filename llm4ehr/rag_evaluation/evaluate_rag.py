@@ -15,15 +15,6 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 from loguru import logger
 import requests
 
-CSV_METADATA_COLUMNS = [
-    "article_id",
-    "article_title",
-    "field_id",
-    "category",
-    "status",
-    "section",
-]
-
 METRIC_COLS = [
     "faithfulness",
     "answer_relevancy",
@@ -40,6 +31,7 @@ DEFAULT_CORRECTNESS_METRICS = [
 MISSING_PAPER_RESPONSE = "MISSING_RESPONSE_FOR_THIS_PAPER"
 DEFAULT_OPENAI_JUDGE_MODEL = "gpt-5.6-luna"
 APP_ENV_PATH = Path(__file__).resolve().parents[1] / "app" / ".env"
+JUDGE_PROVIDERS = ["auto", "openai", "ollama"]
 
 
 def get_active_ollama_models(model_info_url: str) -> dict:
@@ -86,7 +78,7 @@ def validate_ollama_model_available(model_name: str, ollama_base_url: str) -> No
     )
 
 
-def validate_judge_model_available(
+def validate_response_model_available(
     model_name: str,
     model_info_url: str,
     ollama_base_url: str,
@@ -111,63 +103,101 @@ def validate_judge_model_available(
     )
 
 
+def activate_chat_model(model_name: str, model_info_url: str) -> None:
+    """Set the live app's active chat model before evaluation."""
+    activate_url = get_model_list_url(model_info_url).rsplit("/", maxsplit=1)[0] + "/activate"
+    resp = requests.post(
+        activate_url,
+        json={"model_name": model_name, "model_type": "chat"},
+        timeout=30,
+    )
+    resp.raise_for_status()
+
+
+def resolve_judge_provider(judge_model: str, judge_provider: str) -> str:
+    """Choose the judge backend. Ollama model tags usually include a colon."""
+    if judge_provider != "auto":
+        return judge_provider
+    if ":" in judge_model:
+        return "ollama"
+    return "openai"
+
+
 def build_judge(args):
     from openai import OpenAI
     from ragas.llms import llm_factory
     from dotenv import load_dotenv
 
     # Use LangChain's native embeddings component directly to satisfy the legacy metric loop
-    from langchain_ollama import OllamaEmbeddings
+    from langchain_ollama import ChatOllama, OllamaEmbeddings
+    from ragas.llms.base import LangchainLLMWrapper
 
     load_dotenv(APP_ENV_PATH, override=False)
-    openai_api_key = os.environ.get("OPENAI_API_KEY")
-    if not openai_api_key:
-        raise RuntimeError(
-            f"OPENAI_API_KEY is not set. Add it to {APP_ENV_PATH} or export it "
-            "before running the evaluator."
-        )
 
     models = get_active_ollama_models(args.model_info_url)
     active_chat_model = models["chat_model"]
     judge_model = args.judge_model
+    judge_provider = resolve_judge_provider(judge_model, args.judge_provider)
     embedding_model = models["embedding_model"]
 
     logger.info(f"Active chat model: {active_chat_model}")
-    logger.info(f"Judge LLM: {judge_model}")
+    logger.info(f"Judge LLM: {judge_model} ({judge_provider})")
     logger.info(f"Judge Embeddings: {embedding_model}")
-
-    openai_client = OpenAI(
-        api_key=openai_api_key,
-        timeout=args.judge_timeout,
-    )
-
-    if not args.skip_judge_preflight:
-        logger.info("Checking judge model with a tiny preflight request...")
-        start = time.perf_counter()
-        openai_client.chat.completions.create(
+    if judge_provider == "ollama":
+        validate_ollama_model_available(judge_model, args.ollama_base_url)
+        chat_ollama = ChatOllama(
             model=judge_model,
-            messages=[
-                {
-                    "role": "user",
-                    "content": "Reply with exactly: OK",
-                }
-            ],
-            max_completion_tokens=16,
+            base_url=args.ollama_base_url,
+            temperature=0,
+            num_predict=8192,
         )
-        elapsed = time.perf_counter() - start
-        logger.info(f"  Judge preflight completed in {elapsed:.2f}s")
+        if not args.skip_judge_preflight:
+            logger.info("Checking Ollama judge model with a tiny preflight request...")
+            start = time.perf_counter()
+            chat_ollama.invoke("Reply with exactly: OK")
+            elapsed = time.perf_counter() - start
+            logger.info(f"  Judge preflight completed in {elapsed:.2f}s")
+        llm = LangchainLLMWrapper(chat_ollama)
+    else:
+        openai_api_key = os.environ.get("OPENAI_API_KEY")
+        if not openai_api_key:
+            raise RuntimeError(
+                f"OPENAI_API_KEY is not set. Add it to {APP_ENV_PATH} or export it "
+                "before running the evaluator."
+            )
 
-    llm = llm_factory(
-        model=judge_model,
-        client=openai_client,
-    )
+        openai_client = OpenAI(
+            api_key=openai_api_key,
+            timeout=args.judge_timeout,
+        )
 
-    # Newer OpenAI models reject the legacy Chat Completions `max_tokens`
-    # field. RAGAS defaults include it, so replace it explicitly.
-    llm.model_args.pop("max_tokens", None)
-    llm.model_args.pop("temperature", None)
-    llm.model_args.pop("top_p", None)
-    llm.model_args["max_completion_tokens"] = 8192
+        if not args.skip_judge_preflight:
+            logger.info("Checking OpenAI judge model with a tiny preflight request...")
+            start = time.perf_counter()
+            openai_client.chat.completions.create(
+                model=judge_model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": "Reply with exactly: OK",
+                    }
+                ],
+                max_completion_tokens=16,
+            )
+            elapsed = time.perf_counter() - start
+            logger.info(f"  Judge preflight completed in {elapsed:.2f}s")
+
+        llm = llm_factory(
+            model=judge_model,
+            client=openai_client,
+        )
+
+        # Newer OpenAI models reject the legacy Chat Completions `max_tokens`
+        # field. RAGAS defaults include it, so replace it explicitly.
+        llm.model_args.pop("max_tokens", None)
+        llm.model_args.pop("temperature", None)
+        llm.model_args.pop("top_p", None)
+        llm.model_args["max_completion_tokens"] = 8192
 
     # Passing raw LangChain objects matches the legacy namespace metric signature requirements perfectly
     embeddings = OllamaEmbeddings(
@@ -281,6 +311,103 @@ def csv_to_test_cases(path: str | Path) -> list[dict]:
         )
 
     return test_cases
+
+
+def _paper_matches(reference: dict, paper_id: str | None, paper_title: str | None) -> bool:
+    if paper_id and _clean_value(reference.get("article_id")) == paper_id:
+        return True
+    if paper_title:
+        reference_title = normalize_match_key(reference.get("article_title", ""))
+        requested_title = normalize_match_key(paper_title)
+        return bool(
+            requested_title
+            and reference_title
+            and (
+                requested_title in reference_title
+                or reference_title in requested_title
+            )
+        )
+    return False
+
+
+def get_ordered_papers(test_cases: list[dict]) -> list[dict]:
+    """Return unique papers in the order they appear in the converted dataset."""
+    papers = []
+    seen_article_ids = set()
+    seen_titles = set()
+    for case in test_cases:
+        for reference in case.get("references") or []:
+            article_id = _clean_value(reference.get("article_id"))
+            article_title = _clean_value(reference.get("article_title"))
+            dedupe_key = article_id or normalize_match_key(article_title)
+            if not dedupe_key or dedupe_key in seen_article_ids or dedupe_key in seen_titles:
+                continue
+            if article_id:
+                seen_article_ids.add(article_id)
+            seen_titles.add(normalize_match_key(article_title))
+            papers.append(
+                {
+                    "article_id": article_id,
+                    "article_title": article_title,
+                }
+            )
+    return papers
+
+
+def select_specific_paper_cases(
+    test_cases: list[dict],
+    paper_id: str | None = None,
+    paper_title: str | None = None,
+    paper_index: int | None = None,
+) -> list[dict]:
+    """Keep one paper reference per question so weaknesses can be compared by category."""
+    if paper_index is not None:
+        papers = get_ordered_papers(test_cases)
+        if paper_index < 1 or paper_index > len(papers):
+            raise ValueError(
+                f"--paper-index must be between 1 and {len(papers)} for this dataset"
+            )
+        selected_paper = papers[paper_index - 1]
+        paper_id = selected_paper["article_id"]
+        paper_title = selected_paper["article_title"]
+
+    if not paper_id and not paper_title:
+        raise ValueError(
+            "Single-paper evaluation requires --paper-id, --paper-title, or --paper-index."
+        )
+
+    selected_cases = []
+    for case in test_cases:
+        matching_references = [
+            reference
+            for reference in case.get("references") or []
+            if _paper_matches(reference, paper_id, paper_title)
+        ]
+        if not matching_references:
+            continue
+
+        reference = matching_references[0]
+        case_copy = dict(case)
+        metadata = dict(case.get("metadata", {}))
+        metadata.update(
+            {
+                "reference_count": 1,
+                "reference_article_ids": [reference.get("article_id", "")],
+                "selected_paper_id": reference.get("article_id", ""),
+                "selected_paper_title": reference.get("article_title", ""),
+            }
+        )
+        case_copy["references"] = [reference]
+        case_copy["ground_truth"] = reference.get("answer", "")
+        case_copy["contexts"] = [case_copy["ground_truth"]]
+        case_copy["metadata"] = metadata
+        selected_cases.append(case_copy)
+
+    if not selected_cases:
+        selector = paper_id or paper_title or f"paper index {paper_index}"
+        raise ValueError(f"No CSV references matched selected paper: {selector}")
+
+    return selected_cases
 
 
 def format_references_for_ragas(references: list[dict]) -> str:
@@ -464,6 +591,7 @@ def query_rag_api(
     api_url: str,
     question: str,
     retrieval_scope: str,
+    article_id: str | None = None,
     timeout: int | None = 120,
 ) -> dict:
     """Call the live RAG endpoint and return {response, contexts}."""
@@ -472,6 +600,8 @@ def query_rag_api(
         "include_contexts": True,
         "retrieval_scope": retrieval_scope,
     }
+    if article_id:
+        payload["article_id"] = article_id
     resp = requests.post(api_url, json=payload, timeout=timeout)
     resp.raise_for_status()
     return resp.json()
@@ -517,6 +647,7 @@ def build_eval_dataset(
                 args.api_url,
                 question,
                 retrieval_scope=args.retrieval_scope,
+                article_id=metadata.get("selected_paper_id"),
                 timeout=args.api_timeout,
             )
             elapsed = time.perf_counter() - start
@@ -627,17 +758,43 @@ def build_eval_dataset(
                 reference=ground_truth,
             )
         )
+        selected_reference = references[0] if references else {}
+        is_specific_paper_case = bool(metadata.get("selected_paper_id"))
+        output_metadata = {
+            key: value
+            for key, value in metadata.items()
+            if key not in {"selected_paper_id", "selected_paper_title"}
+        }
         sample_metadata.append(
             {
                 "query_id": query_id,
-                "eval_unit": "query",
+                "eval_unit": "paper" if is_specific_paper_case else "query",
+                "paper_index": 1 if is_specific_paper_case else None,
+                "article_id": selected_reference.get("article_id", ""),
+                "article_title": selected_reference.get("article_title", ""),
+                "reference_section": selected_reference.get("section", ""),
+                "reference_status": selected_reference.get("status", ""),
+                "source_row": selected_reference.get("source_row", ""),
                 "api_latency_seconds": elapsed,
                 "retrieved_context_count": len(retrieved_contexts),
-                "expected_context_count": len(expected_contexts),
+                "expected_context_count": (
+                    1 if is_specific_paper_case else len(expected_contexts)
+                ),
                 "max_eval_contexts": args.max_eval_contexts,
                 "max_eval_context_chars": args.max_eval_context_chars,
                 "retrieval_scope": args.retrieval_scope,
-                **metadata,
+                "response_paper_count": 1 if is_specific_paper_case else None,
+                "response_paper_titles": (
+                    [selected_reference.get("article_title", "")]
+                    if is_specific_paper_case
+                    else None
+                ),
+                "matched_response_paper": True if is_specific_paper_case else None,
+                "missing_paper_count": 0 if is_specific_paper_case else None,
+                "missing_paper_titles": [] if is_specific_paper_case else None,
+                "extra_paper_count": 0 if is_specific_paper_case else None,
+                "extra_paper_titles": [] if is_specific_paper_case else None,
+                **output_metadata,
             }
         )
 
@@ -716,6 +873,148 @@ def add_query_level_correctness(df):
     return df
 
 
+def write_diagnostic_summaries(df, output_path: Path) -> None:
+    """Write compact helper CSVs for finding weak question types."""
+    summary_columns = [
+        "sample_count",
+        "correct_rate",
+        "mean_correctness_score",
+        *[f"mean_{metric}" for metric in METRIC_COLS],
+    ]
+    aggregations = {
+        "is_correct": ["count", "mean"],
+        "correctness_score": "mean",
+        **{
+            metric: "mean"
+            for metric in METRIC_COLS
+            if metric in df.columns
+        },
+    }
+
+    rename_columns = {
+        "is_correct_count": "sample_count",
+        "is_correct_mean": "correct_rate",
+        "correctness_score_mean": "mean_correctness_score",
+        **{f"{metric}_mean": f"mean_{metric}" for metric in METRIC_COLS},
+    }
+
+    for group_col in ["category", "field_id", "reference_status"]:
+        if group_col not in df.columns:
+            continue
+
+        summary = df.groupby(group_col, dropna=False).agg(aggregations)
+        summary.columns = [
+            "_".join(column).strip("_")
+            if isinstance(column, tuple)
+            else column
+            for column in summary.columns
+        ]
+        summary = summary.rename(columns=rename_columns).reset_index()
+        ordered_cols = [
+            group_col,
+            *[column for column in summary_columns if column in summary.columns],
+        ]
+        summary = summary[ordered_cols].sort_values(
+            ["correct_rate", "mean_correctness_score"],
+            ascending=[True, True],
+        )
+        summary_path = output_path.with_name(
+            f"{output_path.stem}__by_{group_col}{output_path.suffix}"
+        )
+        summary.to_csv(summary_path, index=False)
+        logger.info(f"Diagnostic summary saved to {summary_path.absolute()}")
+
+    failure_cols = [
+        col
+        for col in [
+            "category",
+            "field_id",
+            "question",
+            "user_input",
+            "article_id",
+            "article_title",
+            "reference_status",
+            "correctness_score",
+            "outcome",
+            "response",
+            "reference",
+            "retrieved_contexts",
+            *METRIC_COLS,
+        ]
+        if col in df.columns
+    ]
+    failures = df[df["is_correct"] == False][failure_cols].sort_values(  # noqa: E712
+        "correctness_score",
+        ascending=True,
+    )
+    failures_path = output_path.with_name(
+        f"{output_path.stem}__needs_review{output_path.suffix}"
+    )
+    failures.to_csv(failures_path, index=False)
+    logger.info(f"Needs-review samples saved to {failures_path.absolute()}")
+
+
+ALL_PAPER_RESULT_COLUMNS = [
+    "query_id",
+    "eval_unit",
+    "paper_index",
+    "article_id",
+    "article_title",
+    "reference_section",
+    "reference_status",
+    "source_row",
+    "api_latency_seconds",
+    "retrieved_context_count",
+    "expected_context_count",
+    "max_eval_contexts",
+    "max_eval_context_chars",
+    "retrieval_scope",
+    "response_paper_count",
+    "response_paper_titles",
+    "matched_response_paper",
+    "grouped_query_id",
+    "category",
+    "field_id",
+    "reference_count",
+    "reference_article_ids",
+    "missing_paper_count",
+    "missing_paper_titles",
+    "extra_paper_count",
+    "extra_paper_titles",
+    "user_input",
+    "retrieved_contexts",
+    "response",
+    "reference",
+    "faithfulness",
+    "answer_relevancy",
+    "context_recall",
+    "llm_context_precision_with_reference",
+    "correctness_score",
+    "is_correct",
+    "correctness_threshold",
+    "correctness_metrics",
+    "outcome",
+    "paper_total_count",
+    "paper_pass_count",
+    "paper_accuracy",
+    "min_paper_correctness",
+    "all_papers_correct",
+    "query_outcome",
+    "response_model",
+    "judge_model",
+    "embedding_model",
+]
+
+
+def align_to_all_paper_result_schema(df):
+    """Keep the main CSV compatible with all-paper experiment result files."""
+    df = df.copy()
+    for column in ALL_PAPER_RESULT_COLUMNS:
+        if column not in df.columns:
+            df[column] = None
+    return df[ALL_PAPER_RESULT_COLUMNS]
+
+
 def main():
     dataset_path = Path(__file__).parent / "datasets" / "ML4EHR.csv"
     results_path = Path(__file__).parent / "results_v2" / "ragas_results_llama_3_1_8b.csv"
@@ -728,8 +1027,25 @@ def main():
         "--judge-model",
         default=DEFAULT_OPENAI_JUDGE_MODEL,
         help=(
-            "OpenAI model used as the RAGAS judge. "
+            "Model used as the RAGAS judge. "
             f"Defaults to {DEFAULT_OPENAI_JUDGE_MODEL}."
+        ),
+    )
+    parser.add_argument(
+        "--judge-provider",
+        choices=JUDGE_PROVIDERS,
+        default="auto",
+        help=(
+            "Judge backend. In auto mode, model names containing ':' use Ollama; "
+            "other model names use OpenAI."
+        ),
+    )
+    parser.add_argument(
+        "--response-model",
+        default=None,
+        help=(
+            "Optional exact Ollama chat model tag to activate before querying RAG "
+            "(for example qwen2.5:7b). If omitted, the app's active chat model is used."
         ),
     )
 
@@ -769,6 +1085,22 @@ def main():
         choices=["all_papers", "relevant_papers", "specific_paper"],
         default="all_papers",
         help="Retrieval scope to send to the RAG chat endpoint",
+    )
+    parser.add_argument(
+        "--paper-id",
+        default=None,
+        help="Article ID to evaluate when --retrieval-scope specific_paper is enabled.",
+    )
+    parser.add_argument(
+        "--paper-title",
+        default=None,
+        help="Paper title or title fragment to evaluate when --retrieval-scope specific_paper is enabled.",
+    )
+    parser.add_argument(
+        "--paper-index",
+        type=int,
+        default=None,
+        help="1-based paper position in the CSV to evaluate when --retrieval-scope specific_paper is enabled.",
     )
 
     parser.add_argument(
@@ -858,6 +1190,17 @@ def main():
         parser.error("--limit must be greater than 0")
     if args.offset < 0:
         parser.error("--offset cannot be negative")
+    if args.paper_index is not None and args.paper_index < 1:
+        parser.error("--paper-index must be greater than 0")
+
+    paper_selector_requested = bool(args.paper_id or args.paper_title or args.paper_index)
+    if args.retrieval_scope == "specific_paper" and not paper_selector_requested:
+        args.paper_index = 1
+    if args.retrieval_scope != "specific_paper" and paper_selector_requested:
+        parser.error(
+            "--paper-id, --paper-title, and --paper-index require "
+            "--retrieval-scope specific_paper"
+        )
     if args.api_timeout < 0:
         parser.error("--api-timeout cannot be negative")
     if args.api_timeout == 0:
@@ -879,6 +1222,21 @@ def main():
     test_cases = load_test_cases(args.dataset)
     logger.info(f"Loaded {len(test_cases)} test cases.\n")
 
+    if args.retrieval_scope == "specific_paper":
+        test_cases = select_specific_paper_cases(
+            test_cases,
+            paper_id=args.paper_id,
+            paper_title=args.paper_title,
+            paper_index=args.paper_index,
+        )
+        selected_paper = test_cases[0]["metadata"]
+        logger.info(
+            "Specific-paper evaluation selected article_id={} title={} with {} question categories.",
+            selected_paper.get("selected_paper_id"),
+            selected_paper.get("selected_paper_title"),
+            len(test_cases),
+        )
+
     if args.write_json_dataset:
         write_test_cases_json(test_cases, args.write_json_dataset)
         logger.info(f"Converted dataset saved to {Path(args.write_json_dataset).absolute()}")
@@ -886,6 +1244,15 @@ def main():
         return
 
     logger.info("Querying live API for each question...")
+    if args.response_model:
+        validate_response_model_available(
+            args.response_model,
+            args.model_info_url,
+            args.ollama_base_url,
+        )
+        activate_chat_model(args.response_model, args.model_info_url)
+        logger.info(f"Activated chat model for RAG responses: {args.response_model}")
+
     eval_dataset, sample_metadata = build_eval_dataset(test_cases, args)
 
     if len(eval_dataset) == 0:
@@ -954,11 +1321,13 @@ def main():
     df["response_model"] = models["chat_model"]
     df["judge_model"] = args.judge_model
     df["embedding_model"] = models["embedding_model"]
+    df = align_to_all_paper_result_schema(df)
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(output_path, index=False)
     logger.info(f"\nPer-sample results saved to {output_path.absolute()}")
+    write_diagnostic_summaries(df, output_path)
 
 
 if __name__ == "__main__":

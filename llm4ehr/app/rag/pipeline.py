@@ -61,6 +61,7 @@ class RAGPipeline:
             QueryRequest(
                 query=retrieval_query,
                 retrieval_scope=request.retrieval_scope,
+                article_id=request.article_id,
             )
         )
 
@@ -102,6 +103,7 @@ class RAGPipeline:
                     max_tokens=request.max_tokens,
                     top_p=request.top_p,
                     retrieval_scope=request.retrieval_scope,
+                    article_id=request.article_id,
                 )
                 resp = self.chat_model.generate_response(single_doc_request)
                 if resp.response.startswith("Error generating response:"):
@@ -150,6 +152,7 @@ class RAGPipeline:
                 max_tokens=request.max_tokens,
                 top_p=request.top_p,
                 retrieval_scope=request.retrieval_scope,
+                article_id=request.article_id,
             )
             response = self.chat_model.generate_response(llm_request)
             final_response = response.response

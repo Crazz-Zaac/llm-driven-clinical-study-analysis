@@ -53,6 +53,7 @@ class Reranker:
         # prepare pairs of (query, document text) for the cross-encoder model
         pairs = [[query, get_text(doc)] for doc in documents]
 
+        # predict the scores for each document with respect to the query using the cross-encoder model
         scores = self.model.predict(pairs)
 
         # set the scores on the documents 
