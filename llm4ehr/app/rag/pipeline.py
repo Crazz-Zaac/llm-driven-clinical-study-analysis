@@ -71,7 +71,7 @@ class RAGPipeline:
         docs = query_response.llm_docs or []
         if not docs:
             return ChatResponse(
-                response="Not found in retrieved documents. Please ensure the article is indexed.",
+                response="not reported",
                 source_documents=[],
                 contexts=[],
                 retrieval_scope=request.retrieval_scope,

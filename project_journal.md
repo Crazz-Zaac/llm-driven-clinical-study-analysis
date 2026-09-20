@@ -626,3 +626,4 @@ llama3.2:3b, qwen2.5:3b (1.9GB), gemma3:1b(1.2GB), qwen3:3b (2.1GB), phi4-mini:3
 - Add the info about ICD taxonomy in the context
 - Reproducibility of papers -> [target (do they include ), cohort definition(do they include the ICD codes, OPS code)]
 - Implement late chunking and for this use a bigger context sized window model like `bge-m3` (8k), `qwen3-embedding` (32k to 40k)
+

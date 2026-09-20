@@ -236,6 +236,7 @@ extra_materials/thesis /.~lock.notes.docx#
 shell.nix
 
 results_*/
+presentation_plots/
 
 *.xlsx
 *.csv

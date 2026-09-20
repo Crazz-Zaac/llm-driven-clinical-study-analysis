@@ -1,5 +1,6 @@
 import ast
 from pathlib import Path
+from textwrap import wrap
 
 import pandas as pd
 import streamlit as st
@@ -7,6 +8,7 @@ import streamlit as st
 
 RESULTS_ROOT = Path(__file__).parent
 DEFAULT_RESULTS_DIR = RESULTS_ROOT / "results_v1"
+QUESTIONNAIRE_PATH = RESULTS_ROOT / "datasets" / "ML4EHR.csv"
 
 METRIC_COLS = [
     "faithfulness",
@@ -27,6 +29,18 @@ DEFAULT_CORRECTNESS_METRICS = [
     "answer_relevancy",
     "context_recall",
 ]
+
+JUDGE_COMPARISION_FILES = {
+    "results_v3": {"retrieval_scope": "all_papers"},
+    "results_v4": {"retrieval_scope": "all_papers"},
+    "results_v5": {"retrieval_scope": "specific_paper"},
+    "results_v6": {"retrieval_scope": "specific_paper"},
+}
+
+RETRIEVAL_SCOPE_LABELS = {
+    "all_papers": "All papers",
+    "specific_paper": "Paper specific",
+}
 
 
 def load_results(path: Path) -> pd.DataFrame:
@@ -51,6 +65,176 @@ def load_results(path: Path) -> pd.DataFrame:
         df["is_correct"] = df["is_correct"].astype(bool)
     df["short_query"] = df["user_input"].str.slice(0, 95)
     return df
+
+
+def format_retrieval_scope(scope: str | None) -> str:
+    if scope is None or pd.isna(scope):
+        return "Unknown"
+    return RETRIEVAL_SCOPE_LABELS.get(str(scope), str(scope).replace("_", " ").title())
+
+
+def retrieval_scope_for_run(result_dir: str, df: pd.DataFrame) -> str:
+    configured_scope = JUDGE_COMPARISION_FILES.get(result_dir, {}).get(
+        "retrieval_scope"
+    )
+    if configured_scope:
+        return format_retrieval_scope(configured_scope)
+
+    if "retrieval_scope" not in df.columns:
+        return "Unknown"
+
+    scopes = df["retrieval_scope"].dropna().astype(str).unique()
+    if len(scopes) == 1:
+        return format_retrieval_scope(scopes[0])
+    if len(scopes) > 1:
+        return "Mixed"
+    return "Unknown"
+
+
+def load_questionnaire(path: Path = QUESTIONNAIRE_PATH) -> pd.DataFrame:
+    df = pd.read_csv(path, encoding="utf-8-sig")
+    df = df.loc[:, [col for col in df.columns if not str(col).startswith("Unnamed")]]
+    df = df.dropna(how="all")
+
+    for col in ["article_id", "article_title", "field_id", "category"]:
+        if col in df.columns:
+            df[col] = df[col].ffill()
+
+    required_cols = ["field_id", "category", "question"]
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        missing = ", ".join(missing_cols)
+        raise ValueError(f"Questionnaire is missing required columns: {missing}")
+
+    questionnaire = df[required_cols].dropna(subset=required_cols).drop_duplicates()
+    questionnaire = questionnaire.reset_index(drop=True)
+    questionnaire["question_id"] = questionnaire.index + 1
+    return questionnaire
+
+
+def dot_quote(value: object) -> str:
+    text = str(value).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+    return f'"{text}"'
+
+
+def wrap_graph_label(text: object, width: int = 46) -> str:
+    normalized = " ".join(str(text).split())
+    return "\n".join(wrap(normalized, width=width, break_long_words=False))
+
+
+def questionnaire_to_dot(questionnaire: pd.DataFrame) -> str:
+    lines = [
+        "digraph questionnaire {",
+        "  graph [rankdir=LR, bgcolor=\"transparent\", pad=\"0.25\", nodesep=\"0.45\", ranksep=\"1.1\"];",
+        "  node [shape=box, style=\"rounded,filled\", fontname=\"Helvetica\", fontsize=11, margin=\"0.10,0.07\", color=\"#d7dee8\"];",
+        "  edge [color=\"#a9b4c2\", arrowsize=0.7];",
+    ]
+
+    for field_id in sorted(questionnaire["field_id"].unique()):
+        node_id = f"field_{field_id}"
+        lines.append(
+            f"  {dot_quote(node_id)} [label={dot_quote(field_id)}, "
+            'fillcolor="#dbeafe", color="#93c5fd", fontsize=13];'
+        )
+
+    categories = questionnaire[["field_id", "category"]].drop_duplicates()
+    for _, row in categories.iterrows():
+        field_node = f"field_{row['field_id']}"
+        category_node = f"category_{row['category']}"
+        category_label = str(row["category"]).replace(f"{row['field_id']}.", "")
+        lines.append(
+            f"  {dot_quote(category_node)} [label={dot_quote(category_label)}, "
+            'fillcolor="#ecfdf5", color="#86efac"];'
+        )
+        lines.append(f"  {dot_quote(field_node)} -> {dot_quote(category_node)};")
+
+    for _, row in questionnaire.iterrows():
+        category_node = f"category_{row['category']}"
+        question_node = f"question_{row['question_id']}"
+        question_label = f"Q{row['question_id']}\n{wrap_graph_label(row['question'])}"
+        lines.append(
+            f"  {dot_quote(question_node)} [label={dot_quote(question_label)}, "
+            'fillcolor="#fff7ed", color="#fdba74", fontsize=9];'
+        )
+        lines.append(f"  {dot_quote(category_node)} -> {dot_quote(question_node)};")
+
+    lines.append("}")
+    return "\n".join(lines)
+
+
+def show_question_visualizer(display_mode: str = "Graph") -> None:
+    st.caption(f"Questionnaire source: `{QUESTIONNAIRE_PATH.relative_to(RESULTS_ROOT)}`")
+
+    try:
+        questionnaire = load_questionnaire()
+    except (FileNotFoundError, ValueError) as exc:
+        st.error(str(exc))
+        return
+
+    field_options = sorted(questionnaire["field_id"].unique())
+    selected_fields = st.sidebar.multiselect(
+        "Question fields",
+        options=field_options,
+        default=field_options,
+    )
+    search = st.sidebar.text_input("Search questionnaire")
+
+    filtered = questionnaire[questionnaire["field_id"].isin(selected_fields)]
+    if search:
+        search_mask = (
+            filtered["field_id"].str.contains(search, case=False, na=False)
+            | filtered["category"].str.contains(search, case=False, na=False)
+            | filtered["question"].str.contains(search, case=False, na=False)
+        )
+        filtered = filtered[search_mask]
+
+    if filtered.empty:
+        st.warning("No questionnaire rows match the current filters.")
+        return
+
+    field_count = filtered["field_id"].nunique()
+    category_count = filtered["category"].nunique()
+    question_count = len(filtered)
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Fields", field_count)
+    col2.metric("Categories", category_count)
+    col3.metric("Questions", question_count)
+
+    if display_mode == "Graph":
+        st.subheader("Question graph")
+        st.graphviz_chart(questionnaire_to_dot(filtered), width="stretch")
+
+    st.subheader("Grouped questionnaire")
+    grouped = filtered.sort_values(["field_id", "category", "question_id"]).rename(
+        columns={
+            "question_id": "Question ID",
+            "field_id": "Field",
+            "category": "Category",
+            "question": "Question",
+        }
+    )
+    for field, field_df in grouped.groupby("Field", sort=True):
+        with st.expander(f"{field} ({len(field_df)} questions)", expanded=True):
+            st.dataframe(
+                field_df[["Question ID", "Category", "Question"]],
+                column_config={
+                    "Question ID": st.column_config.NumberColumn(
+                        "Question ID",
+                        width=100,
+                    ),
+                    "Category": st.column_config.TextColumn(
+                        "Category",
+                        width=260,
+                    ),
+                    "Question": st.column_config.TextColumn(
+                        "Question",
+                        width=820,
+                    ),
+                },
+                hide_index=True,
+                width="stretch",
+                height=min(360, 38 + (len(field_df) + 1) * 35),
+            )
 
 
 def discover_result_dirs(root: Path) -> list[Path]:
@@ -244,17 +428,24 @@ def show_example(row: pd.Series, metric_cols: list[str]) -> None:
                 "Response model": row.get("response_model"),
                 "Judge model": row.get("judge_model"),
                 "Embedding model": row.get("embedding_model"),
+                "Retrieval scope": format_retrieval_scope(row.get("retrieval_scope")),
             }
         )
         st.json(score_payload)
 
 
-def summarize_run(df: pd.DataFrame, run_label: str, metric_cols: list[str]) -> dict:
+def summarize_run(
+    df: pd.DataFrame,
+    run_label: str,
+    metric_cols: list[str],
+    retrieval_scope: str = "Unknown",
+) -> dict:
     correct_count = int(df["is_correct"].sum())
     total_count = len(df)
     accuracy = correct_count / total_count if total_count else 0
     summary = {
         "Run": run_label,
+        "Retrieval scope": retrieval_scope,
         "Queries": total_count,
         "Correct": correct_count,
         "Needs review": total_count - correct_count,
@@ -285,6 +476,7 @@ def prepare_comparison(
         "response",
         "reference",
         "retrieved_contexts",
+        "retrieval_scope",
     ]
     baseline_cols = [col for col in compare_cols if col in baseline_df.columns]
     candidate_cols = [col for col in compare_cols if col in candidate_df.columns]
@@ -303,6 +495,14 @@ def prepare_comparison(
     comparison["Correctness delta"] = (
         comparison["Candidate correctness"] - comparison["Baseline correctness"]
     )
+    if "retrieval_scope_baseline" in comparison.columns:
+        comparison["Baseline retrieval scope"] = comparison[
+            "retrieval_scope_baseline"
+        ].map(format_retrieval_scope)
+    if "retrieval_scope_candidate" in comparison.columns:
+        comparison["Candidate retrieval scope"] = comparison[
+            "retrieval_scope_candidate"
+        ].map(format_retrieval_scope)
 
     for col in metric_cols:
         comparison[f"{METRIC_LABELS.get(col, col)} delta"] = (
@@ -390,6 +590,8 @@ def show_comparison(
     candidate_df: pd.DataFrame,
     baseline_label: str,
     candidate_label: str,
+    baseline_retrieval_scope: str,
+    candidate_retrieval_scope: str,
     available_metric_cols: list[str],
     correctness_metrics: list[str],
     correctness_threshold: float,
@@ -416,8 +618,18 @@ def show_comparison(
 
     summary = pd.DataFrame(
         [
-            summarize_run(baseline_df, baseline_label, available_metric_cols),
-            summarize_run(candidate_df, candidate_label, available_metric_cols),
+            summarize_run(
+                baseline_df,
+                baseline_label,
+                available_metric_cols,
+                baseline_retrieval_scope,
+            ),
+            summarize_run(
+                candidate_df,
+                candidate_label,
+                available_metric_cols,
+                candidate_retrieval_scope,
+            ),
         ]
     )
     st.subheader("Run summary")
@@ -466,9 +678,15 @@ def show_comparison(
     )
 
     st.subheader("Query deltas")
+    retrieval_scope_columns = [
+        col
+        for col in ["Baseline retrieval scope", "Candidate retrieval scope"]
+        if col in comparison.columns
+    ]
     delta_columns = [
         "query_id",
         "Outcome change",
+        *retrieval_scope_columns,
         "Baseline correctness",
         "Candidate correctness",
         "Correctness delta",
@@ -535,11 +753,13 @@ def show_comparison(
     left, right = st.columns(2)
     with left:
         st.markdown(f"### {baseline_label}")
+        st.caption(f"Retrieval scope: {baseline_retrieval_scope}")
         st.metric("Correctness", f"{row['Baseline correctness']:.2f}")
         st.write(row["response_baseline"])
 
     with right:
         st.markdown(f"### {candidate_label}")
+        st.caption(f"Retrieval scope: {candidate_retrieval_scope}")
         st.metric(
             "Correctness",
             f"{row['Candidate correctness']:.2f}",
@@ -551,6 +771,27 @@ def show_comparison(
 st.set_page_config(page_title="RAG Evaluation Explorer", layout="wide")
 st.title("RAG Evaluation Explorer")
 
+st.sidebar.header("Question visualizer")
+question_view = st.sidebar.radio(
+    "Question visualizer",
+    options=["Graph", "Tabular"],
+    label_visibility="collapsed",
+)
+
+st.sidebar.header("Results Visualizer")
+results_view = st.sidebar.radio(
+    "Results Visualizer",
+    options=["Single run", "Compare runs"],
+    index=None,
+    label_visibility="collapsed",
+)
+
+view_mode = results_view or question_view
+
+if view_mode in {"Graph", "Tabular"}:
+    show_question_visualizer(view_mode)
+    st.stop()
+
 result_dirs = discover_result_dirs(RESULTS_ROOT)
 
 if not result_dirs:
@@ -560,11 +801,6 @@ if not result_dirs:
 results_by_dir = csv_files_by_dir(result_dirs)
 
 st.sidebar.header("Results")
-view_mode = st.sidebar.radio(
-    "View mode",
-    options=["Single run", "Compare runs"],
-)
-
 result_dir_names = list(results_by_dir.keys())
 
 if view_mode == "Single run":
@@ -581,7 +817,7 @@ if view_mode == "Single run":
     selected_path = RESULTS_ROOT / selected_dir / selected_file
     df = load_results(selected_path)
     available_metric_cols = [col for col in METRIC_COLS if col in df.columns]
-else:
+elif view_mode == "Compare runs":
     baseline_dir = st.sidebar.selectbox(
         "Baseline directory",
         options=result_dir_names,
@@ -620,6 +856,9 @@ else:
         for col in METRIC_COLS
         if col in baseline_df.columns and col in candidate_df.columns
     ]
+else:
+    st.error(f"Unknown view mode: {view_mode}")
+    st.stop()
 
 if not available_metric_cols:
     st.error("No supported metric columns were found in the selected result file(s).")
@@ -648,7 +887,11 @@ correctness_threshold = st.sidebar.slider(
 )
 
 if view_mode == "Single run":
-    st.caption(f"Viewing `{selected_dir}/{selected_file}`")
+    selected_retrieval_scope = retrieval_scope_for_run(selected_dir, df)
+    st.caption(
+        f"Viewing `{selected_dir}/{selected_file}` | "
+        f"Retrieval scope: {selected_retrieval_scope}"
+    )
     show_single_run(
         df,
         available_metric_cols,
@@ -658,12 +901,16 @@ if view_mode == "Single run":
 else:
     baseline_label = f"{baseline_dir}/{baseline_file}"
     candidate_label = f"{candidate_dir}/{candidate_file}"
+    baseline_retrieval_scope = retrieval_scope_for_run(baseline_dir, baseline_df)
+    candidate_retrieval_scope = retrieval_scope_for_run(candidate_dir, candidate_df)
     st.caption(f"Comparing `{baseline_label}` against `{candidate_label}`")
     show_comparison(
         baseline_df,
         candidate_df,
         baseline_label,
         candidate_label,
+        baseline_retrieval_scope,
+        candidate_retrieval_scope,
         available_metric_cols,
         correctness_metrics,
         correctness_threshold,

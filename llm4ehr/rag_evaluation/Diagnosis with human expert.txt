@@ -1,0 +1,26 @@
+Diagnosis with human expert and judge, evaluating two dimensions separately: 
+(a) whether the pipeline can detect if information is present or not
+(b) whether it can retrieve the right information, and here also two dimensions (i) whether the answer provided is correct and (ii) the context provided for that answer is correct
+
+1. To address (a) Create a reported / not reported mask ground truth (GT), and prompt the model to simply answer not reported if answer is not present (I think this is already addressed), then simply check the overlap between non reported answers in pipeline outputs and ground truth (without RAGAS)
+
+2. To address (b) Restrict to information that is actually reported in the papers and apply human expert and judge evaluation.
+2.1 Expert human evaluation on reported information to check (i) correct answer (ii) correct context (without RAGAS)
+2.2 Judge evaluation on reported information to check (i) correct answer (ii) correct context (RAGAS)
+important - make sure these metrics are calculated only on reported (status == reported) information
+
+> diagnosis on question where the model fails according to each of the two criteria
+- manual pick question/article where info reported (status==reported) in GT but marked as non reported in output (the model can't locate existing information)
+- manual pick question/article where info reported not in GT (status==not reported) but marked as reported in output (the model locates information that doesn't exist)
+- manual pick question/article where info in output is different than info in GT (the model correctly states that information is present but provides wrong answer/evidence)
+
+for these cases
+ -> follow chunck throughout the pipeline to identify where process fails (preprocessing, chuncking, reranking, generation,..)
+ -> rephrase / simplify the question to test the effect of prompting on output (could also check the importance of using the keywords in question for sparse and hybrid search)
+
+for report
+> show the effect of model capacity by plotting model capacity vs correctedness
+> show the effect of main methodological choices (hybrid vs simple search (only dense/sparse search), reranking) by showing performance before and after
+(this after fixing the evaluation criteria)
+
+Extra - check newer model Kimi (e.g. Kimi K3 or newer)

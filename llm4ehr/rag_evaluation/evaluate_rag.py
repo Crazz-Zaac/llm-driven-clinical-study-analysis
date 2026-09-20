@@ -32,6 +32,9 @@ MISSING_PAPER_RESPONSE = "MISSING_RESPONSE_FOR_THIS_PAPER"
 DEFAULT_OPENAI_JUDGE_MODEL = "gpt-5.6-luna"
 APP_ENV_PATH = Path(__file__).resolve().parents[1] / "app" / ".env"
 JUDGE_PROVIDERS = ["auto", "openai", "ollama"]
+REPORTED_STATUS = "reported"
+NOT_REPORTED_STATUS = "not reported"
+REFERENCE_STATUS_FILTERS = ["all", REPORTED_STATUS, NOT_REPORTED_STATUS]
 
 
 def get_active_ollama_models(model_info_url: str) -> dict:
@@ -214,6 +217,80 @@ def _clean_value(value) -> str:
     return str(value).strip()
 
 
+def normalize_reference_status(value) -> str:
+    """Normalize the GT status mask to the two supported labels."""
+    text = re.sub(r"[\s_-]+", " ", _clean_value(value).lower()).strip()
+    if text in {"reported", "report"}:
+        return REPORTED_STATUS
+    if text in {"not reported", "non reported", "unreported", "no reported"}:
+        return NOT_REPORTED_STATUS
+    return text
+
+
+def infer_response_status(response) -> str:
+    """Infer whether the model marked the requested information as present."""
+    text = _clean_value(response)
+    normalized = re.sub(r"\s+", " ", text.lower()).strip(" .;:")
+    if not normalized or normalized == MISSING_PAPER_RESPONSE.lower():
+        return NOT_REPORTED_STATUS
+
+    absence_starts = [
+        "not reported",
+        "not specified",
+        "not explicitly reported",
+        "not provided",
+        "not mentioned",
+        "not found in the retrieved documents",
+        "not found in retrieved documents",
+        "not found in this paper",
+        "no relevant information",
+    ]
+    if any(normalized.startswith(phrase) for phrase in absence_starts):
+        return NOT_REPORTED_STATUS
+
+    absence_sentence_patterns = [
+        r"^(the\s+)?(paper|study|article|authors?)\s+"
+        r"(does|do|did)\s+not\s+"
+        r"(report|state|specify|provide|mention|describe|evaluate|include)\b",
+        r"^no,\s+(the\s+)?(paper|study|article|authors?)\s+"
+        r"(does|do|did)\s+not\s+"
+        r"(report|state|specify|provide|mention|describe|evaluate|include)\b",
+        r"^(the\s+)?requested\s+information\s+"
+        r"(is|was)\s+not\s+(reported|specified|provided|mentioned)\b",
+    ]
+    if any(re.search(pattern, normalized) for pattern in absence_sentence_patterns):
+        return NOT_REPORTED_STATUS
+
+    return REPORTED_STATUS
+
+
+def status_outcome(reference_status: str, response_status: str) -> str:
+    if reference_status == REPORTED_STATUS and response_status == REPORTED_STATUS:
+        return "reported_gt_marked_reported"
+    if reference_status == REPORTED_STATUS and response_status == NOT_REPORTED_STATUS:
+        return "reported_gt_marked_not_reported"
+    if reference_status == NOT_REPORTED_STATUS and response_status == NOT_REPORTED_STATUS:
+        return "not_reported_gt_marked_not_reported"
+    if reference_status == NOT_REPORTED_STATUS and response_status == REPORTED_STATUS:
+        return "not_reported_gt_marked_reported"
+    return "unknown_status"
+
+
+def add_status_mask_columns(df):
+    df = df.copy()
+    df["reference_status"] = df["reference_status"].map(normalize_reference_status)
+    df["response_status"] = df["response"].map(infer_response_status)
+    df["status_match"] = df["reference_status"] == df["response_status"]
+    df["status_outcome"] = [
+        status_outcome(reference_status, response_status)
+        for reference_status, response_status in zip(
+            df["reference_status"],
+            df["response_status"],
+        )
+    ]
+    return df
+
+
 def csv_to_test_cases(path: str | Path) -> list[dict]:
     """Convert the ML4EHR CSV into all-papers evaluation cases.
 
@@ -284,7 +361,7 @@ def csv_to_test_cases(path: str | Path) -> list[dict]:
                 "article_id": _clean_value(row.get("article_id")),
                 "article_title": _clean_value(row.get("article_title")),
                 "section": _clean_value(row.get("section")),
-                "status": _clean_value(row.get("status")),
+                "status": normalize_reference_status(row.get("status")),
                 "answer": _clean_value(row.get("reference_answer")),
                 "source_row": int(row.get("source_row")),
             }
@@ -704,7 +781,9 @@ def build_eval_dataset(
                         "article_id": reference.get("article_id", ""),
                         "article_title": paper_title,
                         "reference_section": reference.get("section", ""),
-                        "reference_status": reference.get("status", ""),
+                        "reference_status": normalize_reference_status(
+                            reference.get("status", "")
+                        ),
                         "source_row": reference.get("source_row", ""),
                         "api_latency_seconds": elapsed,
                         "retrieved_context_count": len(paper_contexts),
@@ -773,7 +852,9 @@ def build_eval_dataset(
                 "article_id": selected_reference.get("article_id", ""),
                 "article_title": selected_reference.get("article_title", ""),
                 "reference_section": selected_reference.get("section", ""),
-                "reference_status": selected_reference.get("status", ""),
+                "reference_status": normalize_reference_status(
+                    selected_reference.get("status", "")
+                ),
                 "source_row": selected_reference.get("source_row", ""),
                 "api_latency_seconds": elapsed,
                 "retrieved_context_count": len(retrieved_contexts),
@@ -804,6 +885,69 @@ def build_eval_dataset(
         time.sleep(0.2)
 
     return EvaluationDataset(samples=samples), sample_metadata
+
+
+def build_status_mask_dataframe(eval_dataset, sample_metadata: list[dict]):
+    import pandas as pd
+
+    records = []
+    for sample, metadata in zip(eval_dataset.samples, sample_metadata):
+        record = dict(metadata)
+        record.update(
+            {
+                "user_input": getattr(sample, "user_input", ""),
+                "retrieved_contexts": getattr(sample, "retrieved_contexts", []),
+                "response": getattr(sample, "response", ""),
+                "reference": getattr(sample, "reference", ""),
+            }
+        )
+        records.append(record)
+
+    if not records:
+        return pd.DataFrame()
+    return add_status_mask_columns(pd.DataFrame(records))
+
+
+def filter_eval_dataset_by_reference_status(
+    eval_dataset,
+    sample_metadata: list[dict],
+    reference_status: str,
+) -> tuple[object, list[dict]]:
+    if reference_status == "all":
+        return eval_dataset, sample_metadata
+
+    from ragas import EvaluationDataset
+
+    normalized_status = normalize_reference_status(reference_status)
+    selected_indexes = [
+        index
+        for index, metadata in enumerate(sample_metadata)
+        if normalize_reference_status(metadata.get("reference_status", ""))
+        == normalized_status
+    ]
+    samples = [eval_dataset.samples[index] for index in selected_indexes]
+    metadata = [sample_metadata[index] for index in selected_indexes]
+    refresh_filtered_query_metadata(metadata)
+    return EvaluationDataset(samples=samples), metadata
+
+
+def refresh_filtered_query_metadata(sample_metadata: list[dict]) -> None:
+    """Keep query-level counts scoped to the filtered paper rows."""
+    grouped_indexes: dict[object, list[int]] = {}
+    for index, metadata in enumerate(sample_metadata):
+        grouped_indexes.setdefault(metadata.get("query_id"), []).append(index)
+
+    for indexes in grouped_indexes.values():
+        missing_titles = [
+            sample_metadata[index].get("article_title", "")
+            for index in indexes
+            if sample_metadata[index].get("matched_response_paper") is False
+        ]
+        for index in indexes:
+            sample_metadata[index]["missing_paper_count"] = len(missing_titles)
+            sample_metadata[index]["missing_paper_titles"] = missing_titles
+            sample_metadata[index]["extra_paper_count"] = 0
+            sample_metadata[index]["extra_paper_titles"] = []
 
 
 def add_derived_correctness(df, metric_cols: list[str], threshold: float):
@@ -954,6 +1098,54 @@ def write_diagnostic_summaries(df, output_path: Path) -> None:
     logger.info(f"Needs-review samples saved to {failures_path.absolute()}")
 
 
+def write_status_mask_summaries(df, output_path: Path) -> None:
+    """Write helper CSVs for the reported/not-reported detection task."""
+    if df.empty or "status_outcome" not in df.columns:
+        return
+
+    summary = (
+        df.groupby(["reference_status", "response_status", "status_outcome"], dropna=False)
+        .size()
+        .reset_index(name="sample_count")
+        .sort_values("sample_count", ascending=False)
+    )
+    summary_path = output_path.with_name(
+        f"{output_path.stem}__status_summary{output_path.suffix}"
+    )
+    summary.to_csv(summary_path, index=False)
+    logger.info(f"Status-mask summary saved to {summary_path.absolute()}")
+
+    review_cols = [
+        col
+        for col in [
+            "query_id",
+            "eval_unit",
+            "paper_index",
+            "article_id",
+            "article_title",
+            "category",
+            "field_id",
+            "reference_status",
+            "response_status",
+            "status_outcome",
+            "question",
+            "user_input",
+            "response",
+            "reference",
+            "retrieved_contexts",
+        ]
+        if col in df.columns
+    ]
+    errors = df[df["status_match"] == False][review_cols].sort_values(  # noqa: E712
+        "status_outcome"
+    )
+    errors_path = output_path.with_name(
+        f"{output_path.stem}__status_errors{output_path.suffix}"
+    )
+    errors.to_csv(errors_path, index=False)
+    logger.info(f"Status-mask errors saved to {errors_path.absolute()}")
+
+
 ALL_PAPER_RESULT_COLUMNS = [
     "query_id",
     "eval_unit",
@@ -984,6 +1176,9 @@ ALL_PAPER_RESULT_COLUMNS = [
     "user_input",
     "retrieved_contexts",
     "response",
+    "response_status",
+    "status_match",
+    "status_outcome",
     "reference",
     "faithfulness",
     "answer_relevancy",
@@ -1182,6 +1377,15 @@ def main():
         choices=METRIC_COLS,
         help="RAGAS metrics to run",
     )
+    parser.add_argument(
+        "--ragas-reference-status",
+        choices=REFERENCE_STATUS_FILTERS,
+        default=REPORTED_STATUS,
+        help=(
+            "Reference status rows to send to RAGAS. Defaults to reported so "
+            "answer/context quality metrics exclude not-reported mask rows."
+        ),
+    )
     args = parser.parse_args()
 
     if args.convert_only and not args.write_json_dataset:
@@ -1261,8 +1465,35 @@ def main():
         )
         sys.exit(1)
 
+    import pandas as pd
+
+    output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    status_mask_df = build_status_mask_dataframe(eval_dataset, sample_metadata)
+    status_mask_path = output_path.with_name(
+        f"{output_path.stem}__status_mask{output_path.suffix}"
+    )
+    status_mask_df.to_csv(status_mask_path, index=False)
+    logger.info(f"Status-mask results saved to {status_mask_path.absolute()}")
+    write_status_mask_summaries(status_mask_df, status_mask_path)
+
+    eval_dataset, sample_metadata = filter_eval_dataset_by_reference_status(
+        eval_dataset,
+        sample_metadata,
+        args.ragas_reference_status,
+    )
+    if len(eval_dataset) == 0:
+        logger.info(
+            "No samples matched --ragas-reference-status="
+            f"{args.ragas_reference_status}. Aborting.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     logger.info(
-        f"\nCollected {len(eval_dataset)} valid samples. Running RAGAs evaluation...\n"
+        f"\nCollected {len(eval_dataset)} valid samples for RAGAS "
+        f"(reference_status={args.ragas_reference_status}). "
+        "Running RAGAs evaluation...\n"
     )
 
     # Build the judge LLM and embeddings for RAGAs evaluation
@@ -1305,10 +1536,10 @@ def main():
     logger.info(result)
 
     df = result.to_pandas()
-    import pandas as pd
 
     metadata_df = pd.DataFrame(sample_metadata)
     df = pd.concat([metadata_df, df.reset_index(drop=True)], axis=1)
+    df = add_status_mask_columns(df)
 
     df = add_derived_correctness(
         df,
@@ -1323,8 +1554,6 @@ def main():
     df["embedding_model"] = models["embedding_model"]
     df = align_to_all_paper_result_schema(df)
 
-    output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(output_path, index=False)
     logger.info(f"\nPer-sample results saved to {output_path.absolute()}")
     write_diagnostic_summaries(df, output_path)

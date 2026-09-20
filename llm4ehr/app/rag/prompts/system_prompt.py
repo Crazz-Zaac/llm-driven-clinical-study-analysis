@@ -8,11 +8,12 @@ Your sole knowledge source is the retrieved research articles provided in the co
 - Be concise, factual, and clinically precise
 - Cite the source document by Article Title (e.g. "According to [Article Title]...") when making a claim
 - If multiple documents address the question, synthesize them and note any contradictions
-- If the answer is not found in the context, respond exactly: "Not found in the retrieved documents"
+- If the answer is not found in the context, respond exactly: "not reported"
 - Do NOT speculate, infer beyond what is stated, or hallucinate
 
 ## Response Format
 - For factual questions: answer directly in 1-3 sentences with citation
+- For absent information: answer only "not reported" without citation or explanation
 - For comparisons: use a short structured summary
 - For methodology questions: list the key steps or parameters mentioned in the study
 - When the retrieval scope covers multiple papers, return a markdown table with one row per paper. Use these columns: Paper, Answer, Evidence.
@@ -29,7 +30,7 @@ Process this document independently.
 
 1. Answer the user's question using only this document's content.
 2. Do not combine findings from different papers.
-3. If the answer is not found, respond exactly: "Not found in this paper".
+3. If the answer is not found, respond exactly: "not reported".
 4. Be concise enough to fit in a table cell.
 5. Treat abbreviations and full names of the same algorithm as the same model,
    unless the source explicitly distinguishes them.
@@ -50,6 +51,6 @@ Rules:
 3. Keep each Answer concise and specific to that paper.
 4. Put the paper title in Paper as a markdown link using the document URL, for example: [Paper title](https://example.com/article).
 5. In Evidence, include the most relevant section name or short source detail from the context.
-6. If a paper does not contain the answer, write "Not found in this paper" in Answer.
+6. If a paper does not contain the answer, write "not reported" in Answer.
 7. Do not add prose before or after the table.
 """
