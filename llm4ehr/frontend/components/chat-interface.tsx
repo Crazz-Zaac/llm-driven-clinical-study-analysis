@@ -402,7 +402,9 @@ export function ChatInterface() {
     setIsGenerating,
     selectedChatModel,
     useHostedModels,
+    hostedProvider,
     hostedModelName,
+    hostedApiKey,
     temperature,
     maxTokens,
     topP,
@@ -410,7 +412,9 @@ export function ChatInterface() {
     setRetrievalScope,
   } = useAppStore()
 
-  const hasModel = selectedChatModel || (useHostedModels && hostedModelName)
+  const hasModel = useHostedModels
+    ? Boolean(hostedModelName.trim() && hostedApiKey.trim())
+    : Boolean(selectedChatModel)
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -510,6 +514,13 @@ export function ChatInterface() {
           temperature,
           max_tokens: maxTokens,
           top_p: topP,
+          ...(useHostedModels
+            ? {
+              hosted_provider: hostedProvider,
+              hosted_model_name: hostedModelName.trim(),
+              hosted_api_key: hostedApiKey.trim(),
+            }
+            : {}),
         }),
         signal: controller.signal,
       })
@@ -660,7 +671,9 @@ export function ChatInterface() {
         </div>
         {!hasModel && (
           <p className="text-xs text-amber-600 dark:text-amber-400 text-center mt-2">
-            Select a chat model in Settings → Models before sending messages.
+            {useHostedModels
+              ? "Choose a hosted chat model and API key in Settings → Models before sending messages."
+              : "Select a local chat model in Settings → Models before sending messages."}
           </p>
         )}
         {errorMessage && (

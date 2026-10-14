@@ -15,23 +15,30 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 from loguru import logger
 import requests
 
+ANSWER_CORRECTNESS_METRIC = "answer_correctness"
+
 METRIC_COLS = [
     "faithfulness",
     "answer_relevancy",
     "context_recall",
     "llm_context_precision_with_reference",
-]
-
-DEFAULT_CORRECTNESS_METRICS = [
-    "faithfulness",
-    "answer_relevancy",
-    "context_recall",
+    ANSWER_CORRECTNESS_METRIC,
 ]
 
 MISSING_PAPER_RESPONSE = "MISSING_RESPONSE_FOR_THIS_PAPER"
 DEFAULT_OPENAI_JUDGE_MODEL = "gpt-5.6-luna"
+DEFAULT_MISTRAL_BASE_URL = "https://api.mistral.ai/v1"
 APP_ENV_PATH = Path(__file__).resolve().parents[1] / "app" / ".env"
-JUDGE_PROVIDERS = ["auto", "openai", "ollama"]
+JUDGE_PROVIDERS = ["auto", "openai", "mistral", "ollama"]
+MISTRAL_MODEL_PREFIXES = (
+    "codestral-",
+    "devstral-",
+    "magistral-",
+    "ministral-",
+    "mistral-",
+    "pixtral-",
+    "voxtral-",
+)
 REPORTED_STATUS = "reported"
 NOT_REPORTED_STATUS = "not reported"
 REFERENCE_STATUS_FILTERS = ["all", REPORTED_STATUS, NOT_REPORTED_STATUS]
@@ -118,11 +125,13 @@ def activate_chat_model(model_name: str, model_info_url: str) -> None:
 
 
 def resolve_judge_provider(judge_model: str, judge_provider: str) -> str:
-    """Choose the judge backend. Ollama model tags usually include a colon."""
+    """Choose the judge backend from common model-name conventions."""
     if judge_provider != "auto":
         return judge_provider
     if ":" in judge_model:
         return "ollama"
+    if judge_model.lower().startswith(MISTRAL_MODEL_PREFIXES):
+        return "mistral"
     return "openai"
 
 
@@ -161,6 +170,54 @@ def build_judge(args):
             elapsed = time.perf_counter() - start
             logger.info(f"  Judge preflight completed in {elapsed:.2f}s")
         llm = LangchainLLMWrapper(chat_ollama)
+    elif judge_provider == "mistral":
+        mistral_api_key = (
+            os.environ.get("MISTRALAI_API_KEY") or os.environ.get("MISTRAL_API_KEY")
+        )
+        if not mistral_api_key:
+            raise RuntimeError(
+                f"MISTRALAI_API_KEY or MISTRAL_API_KEY is not set. Add one to "
+                f"{APP_ENV_PATH} or export it before running the evaluator."
+            )
+
+        mistral_base_url = (
+            os.environ.get("MISTRALAI_BASE_URL")
+            or os.environ.get("MISTRAL_BASE_URL")
+            or args.mistral_base_url
+        )
+        mistral_client = OpenAI(
+            api_key=mistral_api_key,
+            base_url=mistral_base_url,
+            timeout=args.judge_timeout,
+        )
+
+        if not args.skip_judge_preflight:
+            logger.info("Checking Mistral judge model with a tiny preflight request...")
+            start = time.perf_counter()
+            mistral_client.chat.completions.create(
+                model=judge_model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": "Reply with exactly: OK",
+                    }
+                ],
+                max_tokens=16,
+            )
+            elapsed = time.perf_counter() - start
+            logger.info(f"  Judge preflight completed in {elapsed:.2f}s")
+
+        llm = llm_factory(
+            model=judge_model,
+            client=mistral_client,
+        )
+
+        # Mistral's OpenAI-compatible endpoint accepts `max_tokens`, while
+        # newer OpenAI models need `max_completion_tokens`.
+        llm.model_args.pop("max_completion_tokens", None)
+        llm.model_args.pop("temperature", None)
+        llm.model_args.pop("top_p", None)
+        llm.model_args["max_tokens"] = 8192
     else:
         openai_api_key = os.environ.get("OPENAI_API_KEY")
         if not openai_api_key:
@@ -950,20 +1007,21 @@ def refresh_filtered_query_metadata(sample_metadata: list[dict]) -> None:
             sample_metadata[index]["extra_paper_titles"] = []
 
 
-def add_derived_correctness(df, metric_cols: list[str], threshold: float):
-    missing_cols = [col for col in metric_cols if col not in df.columns]
-    if missing_cols:
+def add_answer_correctness_labels(df, threshold: float):
+    if ANSWER_CORRECTNESS_METRIC not in df.columns:
         raise ValueError(
-            "Cannot derive correctness because these metrics are missing: "
-            + ", ".join(missing_cols)
+            f"Cannot label correctness because {ANSWER_CORRECTNESS_METRIC} is "
+            "missing. Include it in --metrics."
         )
 
     df = df.copy()
-    df["correctness_score"] = df[metric_cols].mean(axis=1, skipna=False)
-    df["is_correct"] = df[metric_cols].ge(threshold).all(axis=1)
+    df["correctness_score"] = df[ANSWER_CORRECTNESS_METRIC]
+    df["is_correct"] = df[ANSWER_CORRECTNESS_METRIC].ge(threshold)
     df["correctness_threshold"] = threshold
-    df["correctness_metrics"] = ",".join(metric_cols)
-    df["outcome"] = df["is_correct"].map({True: "Correct", False: "Needs review"})
+    df["correctness_metrics"] = ANSWER_CORRECTNESS_METRIC
+    df["outcome"] = df["is_correct"].map(
+        {True: "Correct", False: "Needs review"}
+    )
     return df
 
 
@@ -1184,6 +1242,7 @@ ALL_PAPER_RESULT_COLUMNS = [
     "answer_relevancy",
     "context_recall",
     "llm_context_precision_with_reference",
+    ANSWER_CORRECTNESS_METRIC,
     "correctness_score",
     "is_correct",
     "correctness_threshold",
@@ -1232,7 +1291,16 @@ def main():
         default="auto",
         help=(
             "Judge backend. In auto mode, model names containing ':' use Ollama; "
-            "other model names use OpenAI."
+            "known Mistral model prefixes like 'ministral-' use Mistral; other "
+            "model names use OpenAI."
+        ),
+    )
+    parser.add_argument(
+        "--mistral-base-url",
+        default=DEFAULT_MISTRAL_BASE_URL,
+        help=(
+            "Base URL for Mistral's OpenAI-compatible API. Can also be set with "
+            f"MISTRALAI_BASE_URL or MISTRAL_BASE_URL. Defaults to {DEFAULT_MISTRAL_BASE_URL}."
         ),
     )
     parser.add_argument(
@@ -1361,14 +1429,17 @@ def main():
         "--correctness-threshold",
         type=float,
         default=0.75,
-        help="Minimum score required on each selected metric to mark a query correct",
+        help=(
+            "Minimum RAGAS answer_correctness score required to mark a "
+            "query correct"
+        ),
     )
     parser.add_argument(
         "--correctness-metrics",
         nargs="+",
-        default=DEFAULT_CORRECTNESS_METRICS,
+        default=None,
         choices=METRIC_COLS,
-        help="Metrics used to derive the is_correct column",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--metrics",
@@ -1415,11 +1486,15 @@ def main():
         args.max_eval_contexts = None
     if not 0 <= args.correctness_threshold <= 1:
         parser.error("--correctness-threshold must be between 0 and 1")
-    missing_correctness_metrics = set(args.correctness_metrics) - set(args.metrics)
-    if missing_correctness_metrics:
+    if ANSWER_CORRECTNESS_METRIC not in args.metrics:
         parser.error(
-            "--correctness-metrics must be included in --metrics. Missing: "
-            + ", ".join(sorted(missing_correctness_metrics))
+            f"--metrics must include {ANSWER_CORRECTNESS_METRIC} because "
+            "correctness_score now uses RAGAS answer_correctness"
+        )
+    if args.correctness_metrics:
+        logger.warning(
+            "--correctness-metrics is deprecated and ignored; correctness_score "
+            f"now uses RAGAS {ANSWER_CORRECTNESS_METRIC}."
         )
 
     logger.info(f"Loading dataset from {args.dataset}...")
@@ -1506,6 +1581,7 @@ def main():
         AnswerRelevancy,  # measures whether LLM's response is relevant to the user's question
         ContextRecall,  # measures whether the retrieved contexts contain the answer to the user's question
         LLMContextPrecisionWithReference,  # measures whether the retrieved contexts are relevant to the user's question and the LLM's response
+        AnswerCorrectness,  # measures whether the LLM's response is correct based on the reference answer
     )
 
     metric_builders = {
@@ -1517,6 +1593,10 @@ def main():
         "context_recall": lambda: ContextRecall(llm=judge_llm),
         "llm_context_precision_with_reference": lambda: (
             LLMContextPrecisionWithReference(llm=judge_llm)
+        ),
+        ANSWER_CORRECTNESS_METRIC: lambda: AnswerCorrectness(
+            llm=judge_llm,
+            embeddings=judge_embeddings,
         ),
     }
     metrics = [metric_builders[metric_name]() for metric_name in args.metrics]
@@ -1541,9 +1621,8 @@ def main():
     df = pd.concat([metadata_df, df.reset_index(drop=True)], axis=1)
     df = add_status_mask_columns(df)
 
-    df = add_derived_correctness(
+    df = add_answer_correctness_labels(
         df,
-        metric_cols=args.correctness_metrics,
         threshold=args.correctness_threshold,
     )
     df = add_query_level_correctness(df)

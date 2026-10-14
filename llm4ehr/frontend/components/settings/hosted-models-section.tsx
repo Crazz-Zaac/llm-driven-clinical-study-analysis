@@ -1,7 +1,7 @@
 "use client"
 
-import { useState } from "react"
-import { useAppStore } from "@/lib/store"
+import { useEffect, useState } from "react"
+import { useAppStore, type HostedProvider } from "@/lib/store"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -19,13 +19,73 @@ import {
 } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 
-const POPULAR_MODELS = [
-  { id: "meta-llama/Llama-3.1-8B-Instruct", name: "Llama 3.1 8B", provider: "Meta" },
-  { id: "mistralai/Mistral-7B-Instruct-v0.3", name: "Mistral 7B", provider: "Mistral AI" },
-  { id: "microsoft/Phi-3-mini-4k-instruct", name: "Phi-3 Mini", provider: "Microsoft" },
-  { id: "google/gemma-2-9b-it", name: "Gemma 2 9B", provider: "Google" },
-  { id: "Qwen/Qwen2-7B-Instruct", name: "Qwen2 7B", provider: "Alibaba" },
+type HostedModelOption = {
+  id: string
+  name: string
+  provider: string
+}
+
+type HostedProviderOption = {
+  id: HostedProvider
+  label: string
+  keyLink: { label: string; href: string }
+  placeholder: string
+  helperText: string
+  models: HostedModelOption[]
+}
+
+const HOSTED_PROVIDERS: HostedProviderOption[] = [
+  {
+    id: "openai",
+    label: "OpenAI",
+    keyLink: {
+      label: "Get OpenAI API key",
+      href: "https://platform.openai.com/api-keys",
+    },
+    placeholder: "e.g., gpt-4o-mini",
+    helperText: "Enter the OpenAI chat model ID.",
+    models: [
+      { id: "gpt-4o-mini", name: "GPT-4o mini", provider: "OpenAI" },
+      { id: "gpt-4o", name: "GPT-4o", provider: "OpenAI" },
+    ],
+  },
+  {
+    id: "mistral",
+    label: "Mistral AI",
+    keyLink: {
+      label: "Get Mistral API key",
+      href: "https://console.mistral.ai/api-keys",
+    },
+    placeholder: "e.g., mistral-small-latest",
+    helperText: "Enter the Mistral chat model ID.",
+    models: [
+      { id: "mistral-small-latest", name: "Mistral Small", provider: "Mistral AI" },
+      { id: "mistral-large-latest", name: "Mistral Large", provider: "Mistral AI" },
+      { id: "ministral-8b-latest", name: "Ministral 8B", provider: "Mistral AI" },
+    ],
+  },
+  {
+    id: "huggingface",
+    label: "Hugging Face",
+    keyLink: {
+      label: "Get Hugging Face token",
+      href: "https://huggingface.co/settings/tokens",
+    },
+    placeholder: "e.g., meta-llama/Llama-3.1-8B-Instruct",
+    helperText: "Enter the full Hugging Face Hub model path.",
+    models: [
+      { id: "meta-llama/Llama-3.1-8B-Instruct", name: "Llama 3.1 8B", provider: "Meta" },
+      { id: "mistralai/Mistral-7B-Instruct-v0.3", name: "Mistral 7B", provider: "Mistral AI" },
+      { id: "microsoft/Phi-3-mini-4k-instruct", name: "Phi-3 Mini", provider: "Microsoft" },
+      { id: "google/gemma-2-9b-it", name: "Gemma 2 9B", provider: "Google" },
+      { id: "Qwen/Qwen2-7B-Instruct", name: "Qwen2 7B", provider: "Alibaba" },
+    ],
+  },
 ]
+
+const providerConfigById = Object.fromEntries(
+  HOSTED_PROVIDERS.map((provider) => [provider.id, provider]),
+) as Record<HostedProvider, HostedProviderOption>
 
 export function HostedModelsSection() {
   const {
@@ -39,39 +99,46 @@ export function HostedModelsSection() {
   } = useAppStore()
 
   const [showApiKey, setShowApiKey] = useState(false)
-  const [apiKeySaved, setApiKeySaved] = useState(false)
+  const selectedProvider = providerConfigById[hostedProvider] ? hostedProvider : "openai"
+  const [draftProvider, setDraftProvider] = useState<HostedProvider>(selectedProvider)
+  const [draftModelName, setDraftModelName] = useState(hostedModelName)
+  const [draftApiKey, setDraftApiKey] = useState(hostedApiKey)
+  const providerConfig = providerConfigById[draftProvider]
+  const trimmedDraftApiKey = draftApiKey.trim()
+  const trimmedDraftModelName = draftModelName.trim()
+  const canSaveSettings = Boolean(trimmedDraftApiKey && trimmedDraftModelName)
+  const settingsAreSaved =
+    canSaveSettings &&
+    draftProvider === selectedProvider &&
+    trimmedDraftModelName === hostedModelName.trim() &&
+    trimmedDraftApiKey === hostedApiKey.trim()
+
+  useEffect(() => {
+    setDraftProvider(selectedProvider)
+    setDraftModelName(hostedModelName)
+    setDraftApiKey(hostedApiKey)
+  }, [hostedApiKey, hostedModelName, selectedProvider])
 
   const handleApiKeyChange = (value: string) => {
-    setHostedApiKey(value)
-    setApiKeySaved(false)
+    setDraftApiKey(value)
   }
 
-  const handleSaveApiKey = () => {
-    if (hostedApiKey) {
-      setApiKeySaved(true)
-      // The key is automatically persisted via zustand persist
+  const handleSaveSettings = () => {
+    if (!canSaveSettings) return
+
+    setHostedProvider(draftProvider)
+    setHostedModelName(trimmedDraftModelName)
+    setHostedApiKey(trimmedDraftApiKey)
+  }
+
+  const handleProviderChange = (provider: HostedProvider) => {
+    if (provider === draftProvider) {
+      return
     }
-  }
 
-  const providerLabels: Record<string, string> = {
-    huggingface: "Hugging Face",
-    openai: "OpenAI",
-    anthropic: "Anthropic",
-  }
-
-  const providerLinks: Record<string, { label: string; href: string }> = {
-    huggingface: {
-      label: "Get Hugging Face token",
-      href: "https://huggingface.co/settings/tokens",
-    },
-    openai: {
-      label: "Get OpenAI API key",
-      href: "https://platform.openai.com/api-keys",
-    },
-    anthropic: {
-      label: "Get Anthropic API key",
-      href: "https://console.anthropic.com/settings/keys",
-    },
+    setDraftProvider(provider)
+    setDraftApiKey("")
+    setDraftModelName(providerConfigById[provider].models[0]?.id ?? "")
   }
 
   if (!useHostedModels) {
@@ -83,21 +150,23 @@ export function HostedModelsSection() {
       <CardHeader>
         <CardTitle>Hosted Models</CardTitle>
         <CardDescription>
-          Connect to hosted model providers like Hugging Face, OpenAI, or Anthropic.
-          Your API key is stored securely in your browser and never sent to our servers.
+          Connect to hosted model providers like OpenAI, Mistral AI, or Hugging Face.
+          Your API key is stored in this browser and sent only with hosted generation requests.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="space-y-3">
           <Label htmlFor="provider">Provider</Label>
-          <Select value={hostedProvider} onValueChange={setHostedProvider}>
+          <Select value={draftProvider} onValueChange={(value) => handleProviderChange(value as HostedProvider)}>
             <SelectTrigger id="provider">
               <SelectValue placeholder="Select provider" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="huggingface">Hugging Face</SelectItem>
-              <SelectItem value="openai">OpenAI</SelectItem>
-              <SelectItem value="anthropic">Anthropic</SelectItem>
+              {HOSTED_PROVIDERS.map((provider) => (
+                <SelectItem key={provider.id} value={provider.id}>
+                  {provider.label}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
@@ -109,7 +178,7 @@ export function HostedModelsSection() {
               <Shield className="h-4 w-4" />
               API Key
             </Label>
-            {apiKeySaved && hostedApiKey && (
+            {settingsAreSaved && (
               <Badge variant="default" className="gap-1">
                 <Check className="h-3 w-3" />
                 Saved
@@ -121,9 +190,11 @@ export function HostedModelsSection() {
               <Input
                 id="api-key"
                 type={showApiKey ? "text" : "password"}
-                placeholder={`Enter your ${providerLabels[hostedProvider] ?? "provider"} API key`}
-                value={hostedApiKey}
+                placeholder={`Enter your ${providerConfig.label} API key`}
+                value={draftApiKey}
                 onChange={(e) => handleApiKeyChange(e.target.value)}
+                required
+                aria-required="true"
                 className="pr-10 font-mono"
               />
               <Button
@@ -141,25 +212,23 @@ export function HostedModelsSection() {
                 <span className="sr-only">{showApiKey ? "Hide" : "Show"} API key</span>
               </Button>
             </div>
-            <Button onClick={handleSaveApiKey} disabled={!hostedApiKey}>
-              Save Key
+            <Button onClick={handleSaveSettings} disabled={!canSaveSettings}>
+              Save Settings
             </Button>
           </div>
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <span className="flex items-center gap-1">
               <Shield className="h-3 w-3" />
-              Stored locally in your browser - encrypted at rest
+              Stored locally in this browser
             </span>
-            {providerLinks[hostedProvider] && (
-              <a
-                href={providerLinks[hostedProvider].href}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-primary hover:underline"
-              >
-                {providerLinks[hostedProvider].label} <ExternalLink className="h-3 w-3" />
-              </a>
-            )}
+            <a
+              href={providerConfig.keyLink.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-primary hover:underline"
+            >
+              {providerConfig.keyLink.label} <ExternalLink className="h-3 w-3" />
+            </a>
           </div>
         </div>
 
@@ -168,25 +237,25 @@ export function HostedModelsSection() {
           <Label htmlFor="model-name">Chat Model</Label>
           <Input
             id="model-name"
-            placeholder="e.g., meta-llama/Llama-3.1-8B-Instruct"
-            value={hostedModelName}
-            onChange={(e) => setHostedModelName(e.target.value)}
+            placeholder={providerConfig.placeholder}
+            value={draftModelName}
+            onChange={(e) => setDraftModelName(e.target.value)}
           />
           <p className="text-xs text-muted-foreground">
-            Enter the full model identifier from your provider (e.g., Hugging Face Hub path)
+            {providerConfig.helperText}
           </p>
         </div>
 
         {/* Popular Models */}
         <div className="space-y-3">
-          <Label>Popular Models</Label>
+          <Label>Suggested Chat Models</Label>
           <div className="grid gap-2 sm:grid-cols-2">
-            {POPULAR_MODELS.map((model) => {
-              const isSelected = hostedModelName === model.id
+            {providerConfig.models.map((model) => {
+              const isSelected = draftModelName === model.id
               return (
                 <button
                   key={model.id}
-                  onClick={() => setHostedModelName(isSelected ? "" : model.id)}
+                  onClick={() => setDraftModelName(isSelected ? "" : model.id)}
                   className={`flex items-center justify-between p-3 rounded-lg border transition-colors text-left ${isSelected
                     ? "border-primary bg-primary/5"
                     : "border-border hover:bg-muted/50"
@@ -206,12 +275,11 @@ export function HostedModelsSection() {
         </div>
 
         {/* Warnings */}
-        {!hostedApiKey && (
+        {!trimmedDraftApiKey && (
           <Alert>
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>
-              An API key is required to use hosted models. Most providers require authentication
-              for API access.
+              An API key is required before hosted model settings can be saved.
             </AlertDescription>
           </Alert>
         )}

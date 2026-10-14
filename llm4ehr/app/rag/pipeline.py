@@ -104,6 +104,9 @@ class RAGPipeline:
                     top_p=request.top_p,
                     retrieval_scope=request.retrieval_scope,
                     article_id=request.article_id,
+                    hosted_provider=request.hosted_provider,
+                    hosted_model_name=request.hosted_model_name,
+                    hosted_api_key=request.hosted_api_key,
                 )
                 resp = self.chat_model.generate_response(single_doc_request)
                 if resp.response.startswith("Error generating response:"):
@@ -153,6 +156,9 @@ class RAGPipeline:
                 top_p=request.top_p,
                 retrieval_scope=request.retrieval_scope,
                 article_id=request.article_id,
+                hosted_provider=request.hosted_provider,
+                hosted_model_name=request.hosted_model_name,
+                hosted_api_key=request.hosted_api_key,
             )
             response = self.chat_model.generate_response(llm_request)
             final_response = response.response

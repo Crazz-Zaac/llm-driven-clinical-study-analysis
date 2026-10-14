@@ -34,6 +34,7 @@ export function ContextSidebar() {
         selectedChatModel,
         selectedEmbeddingModel,
         useHostedModels,
+        hostedProvider,
         hostedModelName,
         temperature,
         maxTokens,
@@ -246,7 +247,7 @@ export function ContextSidebar() {
                                     <div className="text-xs">
                                         <p className="text-muted-foreground mb-1">Type</p>
                                         <Badge variant="outline" className="text-xs">
-                                            {useHostedModels ? "Hosted" : "Local"}
+                                            {useHostedModels ? `Hosted: ${hostedProvider}` : "Local"}
                                         </Badge>
                                     </div>
                                 </div>

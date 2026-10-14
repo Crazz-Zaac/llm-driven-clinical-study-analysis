@@ -7,6 +7,7 @@
 - Add package to poetry only for evaluation (for example): `poetry add -G evaluation streamlit`
 - Testing scripts: `PYTHONPATH=. python tests/embedding_test.py`
 - Running RAGAs evaluation script: `python evaluate_rag.py --api-timeout 0 --judge-timeout 1200 --dataset datasets/ML4EHR.json --retrieval-scope all_papers --judge-model qwen2.5:7b --output results_v3/llama_3_2_1b__qwen2_5_7b.csv`
+`python evaluate_rag.py --api-timeout 0 --judge-timeout 1200 --dataset datasets/ML4EHR.json --retrieval-scope all_papers --skip-judge-preflight --judge-model ministral-8b-2512 --judge-provider mistral --output results_v8/medllama_2_7b.csv `
 ---
 
 # Project History
@@ -627,3 +628,8 @@ llama3.2:3b, qwen2.5:3b (1.9GB), gemma3:1b(1.2GB), qwen3:3b (2.1GB), phi4-mini:3
 - Reproducibility of papers -> [target (do they include ), cohort definition(do they include the ICD codes, OPS code)]
 - Implement late chunking and for this use a bigger context sized window model like `bge-m3` (8k), `qwen3-embedding` (32k to 40k)
 
+
+
+## Future Work:
+1. Model Temperature: Experiment with different temperature settings for the LLM to see how it affects the quality and creativity of the responses. A lower temperature may yield more deterministic and focused answers, while a higher temperature may produce more diverse and creative responses.
+2. Most likely question formulation (too generic, too complex, too lengthy)

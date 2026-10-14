@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RAG failure review</title>
+<style>
+:root{--bg:#e9ecf1;--panel:#fff;--line:#d9dde3;--ink:#1d2330;--mute:#5f6b7a;--accent:#1f5fbf;--ok:#1d7a46;--bad:#b3261e;--warn:#9a6700}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink);height:100vh;display:flex;flex-direction:column}
+header{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:10px 14px;background:var(--panel);border-bottom:1px solid var(--line)}
+header h1{font-size:16px;margin:0 8px 0 0}
+select,input[type=text],textarea,button{font:inherit;padding:5px 8px;border:1px solid var(--line);border-radius:5px;background:#fff;color:var(--ink)}
+button{cursor:pointer}button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+#main{flex:1;display:flex;min-height:0}
+#list{width:330px;overflow:auto;border-right:1px solid var(--line);background:var(--panel)}
+.item{padding:8px 12px;border-bottom:1px solid var(--line);cursor:pointer}
+.item:hover{background:#f0f4fa}.item.sel{background:#e4eefc;border-left:3px solid var(--accent);padding-left:9px}
+.item .t{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item .m{font-size:12px;color:var(--mute);display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.tag{display:inline-block;padding:0 7px;border-radius:9px;font-size:12px;border:1px solid var(--line);background:#fff}
+.tag.missed{color:var(--bad);border-color:var(--bad)}.tag.hallucinated{color:var(--warn);border-color:var(--warn)}.tag.wrong{color:#7b3fb3;border-color:#7b3fb3}.tag.ok{color:var(--ok);border-color:var(--ok)}
+.tag.lab{background:#e8f5ec;color:var(--ok);border-color:var(--ok)}
+#detail{flex:1;min-width:0;padding:12px 16px;display:flex;flex-direction:column;gap:10px;overflow:hidden}
+.meta{flex:none;display:flex;flex-wrap:wrap;gap:4px 18px;font-size:13px;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:7px 12px}
+.meta span b{color:var(--mute);font-weight:500}
+.regions{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:minmax(0,.55fr) minmax(0,1fr) minmax(0,1.5fr);gap:10px}
+.box{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--panel);border:1px solid var(--line);border-top:3px solid var(--c);border-radius:6px;overflow:hidden;box-shadow:0 1px 2px rgba(20,30,50,.06)}
+.box>h3{flex:none;margin:0;padding:6px 12px;background:var(--tint);border-bottom:1px solid var(--line);font-size:13px;font-weight:600;color:var(--c);display:flex;align-items:center;gap:10px}
+.box>h3 .hint{font-weight:400;color:var(--mute)}
+.txt{flex:1;min-height:0;overflow:auto;padding:10px 12px;white-space:pre-wrap;word-break:break-word}
+.q{--c:#3b5b8c;--tint:#e9f0fa}.gt{--c:#1d7a46;--tint:#e4f4ea}.resp{--c:#6b3fa0;--tint:#f0e9f9}.ctxb{--c:#a15c00;--tint:#fdf0da}.lab{--c:#444c5a;--tint:#e8ebf0}
+.ctx{border:1px solid #efd9b0;background:#fffaf0;border-radius:5px;padding:7px 10px;margin-bottom:8px;white-space:pre-wrap}
+.ctx b{color:var(--c);font-size:12px}
+.labpad{flex:none;padding:8px 12px}
+mark{background:#ffe58a}
+#empty{margin:60px auto;max-width:520px;text-align:center;color:var(--mute)}
+kbd{border:1px solid var(--line);border-bottom-width:2px;border-radius:3px;padding:0 4px;font-size:12px;background:#fff}
+@media(max-width:900px){#main{flex-direction:column}#list{width:100%;max-height:35vh}#detail{overflow:auto}.regions{display:flex;flex-direction:column}.box{height:260px;flex:none}}
+</style>
+</head>
+<body>
+<header>
+  <h1>RAG failure review</h1>
+  <input type="file" id="file" accept=".csv,.tsv,.txt">
+  <select id="fCat"></select>
+  <select id="fLab">
+    <option value="all">All labeling states</option>
+    <option value="todo">Unlabeled only</option>
+    <option value="done">Labeled only</option>
+  </select>
+  <input type="text" id="search" placeholder="Search text…" size="16">
+  <span id="progress" style="color:var(--mute)"></span>
+  <span style="flex:1"></span>
+  <button class="primary" id="export">Export CSV</button>
+  <button id="clear">Reset labels</button>
+</header>
+<div id="main">
+  <div id="list"></div>
+  <div id="detail"><div id="empty"><h2>Load your results CSV</h2>
+    <p>Comma- or tab-separated. Everything stays in your browser; labels are saved automatically and survive a reload when you open the same file name again.</p></div></div>
+</div>
+
+<script>
+const LABELS = [
+  ["retrieval_miss", "Context lacks the answer (retrieval failure)", "1"],
+  ["generation_miss", "Context has the answer, model missed/wrong (generation failure)", "2"],
+  ["gt_error", "Ground truth wrong or incomplete", "3"],
+  ["model_ok", "Model actually correct (metric false alarm)", "4"],
+  ["unclear", "Ambiguous / unsure", "5"]
+];
+let HEAD = [], ROWS = [], VIEW = [], cur = -1, fname = "", store = {};
+
+/* ---------- CSV parsing (quotes, embedded newlines, tab or comma) ---------- */
+function parseCSV(text) {
+  text = text.replace(/^\uFEFF/, "");
+  const first = text.split(/\r?\n/)[0];
+  const d = (first.split("\t").length > first.split(",").length) ? "\t" : ",";
+  const out = []; let row = [], f = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') { if (text[i+1] === '"') { f += '"'; i++; } else q = false; }
+      else f += c;
+    } else if (c === '"') q = true;
+    else if (c === d) { row.push(f); f = ""; }
+    else if (c === "\n" || c === "\r") {
+      if (c === "\r" && text[i+1] === "\n") i++;
+      row.push(f); f = ""; out.push(row); row = [];
+    } else f += c;
+  }
+  if (f !== "" || row.length) { row.push(f); out.push(row); }
+  return out.filter(r => r.length > 1 || (r[0] || "").trim() !== "");
+}
+function toCSV(head, rows) {
+  const esc = v => { v = v == null ? "" : String(v); return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+  return [head.map(esc).join(",")].concat(rows.map(r => head.map(h => esc(r[h])).join(","))).join("\n");
+}
+
+/* ---------- failure category ---------- */
+const isNot = s => /not|no\b|absent|missing|none|n\/a/i.test(s || "") ;
+const isRep = s => (s || "").trim() !== "" && !isNot(s);
+function category(r) {
+  const gt = r.reference_status, rs = r.response_status;
+  const correct = String(r.is_correct).toLowerCase() === "true" || r.is_correct === "1";
+  if (isRep(gt) && isNot(rs)) return "missed";
+  if (isNot(gt) && isRep(rs)) return "hallucinated";
+  if (isRep(gt) && isRep(rs) && !correct) return "wrong";
+  return "ok";
+}
+const CAT_NAME = {
+  missed: "Missed: GT reported → output not reported",
+  hallucinated: "Hallucinated: GT not reported → output reported",
+  wrong: "Wrong: both reported, content differs / not correct",
+  ok: "No failure (agree & correct)"
+};
+
+/* ---------- storage ---------- */
+const skey = () => "review:" + fname.replace(/(_labeled)+(?=\.)/, "");
+const save = () => { try { localStorage.setItem(skey(), JSON.stringify(store)); } catch (e) {} };
+const load = () => { try { store = JSON.parse(localStorage.getItem(skey())) || {}; } catch (e) { store = {}; } };
+
+/* ---------- UI ---------- */
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? "" : s).replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+
+$("file").onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  fname = f.name;
+  const rd = new FileReader();
+  rd.onload = () => {
+    const t = parseCSV(rd.result);
+    HEAD = t[0].map(h => h.trim());
+    ROWS = t.slice(1).map((r, i) => {
+      const o = {}; HEAD.forEach((h, j) => o[h] = r[j] ?? ""); o.__i = i; o.__cat = category(o); return o;
+    });
+    load();
+    // resume from a previously exported CSV: restore labels/notes stored in its columns
+    let restored = 0;
+    ROWS.forEach(r => {
+      if ((r.manual_label || r.manual_notes) && !store[r.__i]?.label) {
+        store[r.__i] = { label: r.manual_label || "", notes: store[r.__i]?.notes || r.manual_notes || "" };
+        if (r.manual_label) restored++;
+      }
+    });
+    if (restored) save();
+    const cats = {}; ROWS.forEach(r => cats[r.__cat] = (cats[r.__cat] || 0) + 1);
+    $("fCat").innerHTML = `<option value="fail">All failures (${ROWS.length - (cats.ok || 0)})</option><option value="all">All rows (${ROWS.length})</option>` +
+      Object.keys(CAT_NAME).map(k => `<option value="${k}">${CAT_NAME[k]} (${cats[k] || 0})</option>`).join("");
+    cur = -1; applyFilter();
+  };
+  rd.readAsText(f);
+};
+["fCat", "fLab", "search"].forEach(id => $(id).addEventListener("input", () => { cur = -1; applyFilter(); }));
+
+function applyFilter() {
+  const c = $("fCat").value, l = $("fLab").value, q = $("search").value.toLowerCase();
+  VIEW = ROWS.filter(r => {
+    if (c === "fail" && r.__cat === "ok") return false;
+    if (!["fail", "all"].includes(c) && r.__cat !== c) return false;
+    const lab = store[r.__i]?.label;
+    if (l === "todo" && lab) return false;
+    if (l === "done" && !lab) return false;
+    if (q && !((r.user_input + r.article_title + r.response + r.reference).toLowerCase().includes(q))) return false;
+    return true;
+  });
+  renderList();
+  if (VIEW.length) select(0); else $("detail").innerHTML = '<div id="empty">No rows match these filters.</div>';
+}
+function renderList() {
+  const done = ROWS.filter(r => store[r.__i]?.label).length;
+  $("progress").textContent = `${VIEW.length} shown · ${done}/${ROWS.length} labeled`;
+  $("list").innerHTML = VIEW.map((r, k) => `<div class="item ${k === cur ? "sel" : ""}" data-k="${k}">
+    <div class="t">${esc(r.article_title || r.article_id || ("row " + r.__i))}</div>
+    <div class="t" style="color:var(--mute)">${esc((r.user_input || "").slice(0, 90))}</div>
+    <div class="m"><span class="tag ${r.__cat}">${r.__cat}</span>${store[r.__i]?.label ? `<span class="tag lab">${esc(store[r.__i].label)}</span>` : ""}</div></div>`).join("");
+  document.querySelectorAll(".item").forEach(el => el.onclick = () => select(+el.dataset.k));
+}
+function clean(t) { return String(t || "").replace(/<br\s*\/?>/gi, "\n").replace(/\\\|/g, "|"); }
+function parseCtx(s) {
+  try { const j = JSON.parse(s); if (Array.isArray(j)) return j.map(x => typeof x === "string" ? x : JSON.stringify(x)); } catch (e) {}
+  try { const j = JSON.parse(s.replace(/'/g, '"')); if (Array.isArray(j)) return j.map(String); } catch (e) {}
+  return [s];
+}
+function select(k) {
+  if (k < 0 || k >= VIEW.length) return;
+  cur = k; const r = VIEW[k], st = store[r.__i] || {};
+  const ctx = parseCtx(r.retrieved_contexts || "");
+  const colour = v => ({ true: "var(--ok)", false: "var(--bad)" }[String(v).toLowerCase()] || "inherit");
+  $("detail").innerHTML = `
+  <div class="meta">
+    <span><b>row</b> ${r.__i + 1}</span>
+    <span><b>article</b> ${esc(r.article_title)}</span>
+    <span><b>category</b> <span class="tag ${r.__cat}">${r.__cat}</span></span>
+    <span><b>status_outcome</b> ${esc(r.status_outcome)}</span>
+    <span><b>GT status</b> ${esc(r.reference_status)}</span>
+    <span><b>model status</b> ${esc(r.response_status)}</span>
+    <span><b>is_correct</b> <span style="color:${colour(r.is_correct)}">${esc(r.is_correct)}</span></span>
+    <span><b>correctness_score</b> ${esc(r.correctness_score)}</span>
+  </div>
+  <div class="regions">
+    <div class="box q" style="grid-column:1/-1"><h3>Question (user_input)</h3><div class="txt">${esc(r.user_input)}</div></div>
+    <div class="box gt"><h3>Ground truth (reference)</h3><div class="txt">${esc(clean(r.reference))}</div></div>
+    <div class="box resp"><h3>Model response</h3><div class="txt">${esc(clean(r.response))}</div></div>
+    <div class="box ctxb" style="grid-column:1/-1"><h3>Retrieved contexts (${ctx.length}) <input type="text" id="find" placeholder="Highlight words in contexts…" size="28"></h3>
+      <div class="txt" id="ctxbox">${ctx.map((c, i) => `<div class="ctx"><b>[${i + 1}]</b> <span class="c">${esc(c)}</span></div>`).join("")}</div></div>
+  </div>
+  <div class="box lab">
+    <h3>Manual label <span class="hint">keys <kbd>1</kbd>–<kbd>5</kbd> label · <kbd>←</kbd>/<kbd>→</kbd> navigate · <kbd>0</kbd> clear</span></h3>
+    <div class="labpad">
+      <div id="labels">${LABELS.map(([v, t, key]) => `<button data-v="${v}" class="${st.label === v ? "on" : ""}" title="${esc(t)}">${key}. ${esc(t)}</button>`).join("")}</div>
+      <textarea id="notes" rows="2" style="width:100%" placeholder="Notes (optional)">${esc(st.notes || "")}</textarea>
+      <div style="margin-top:6px"><button id="prev">← Prev</button> <button id="next">Next →</button></div>
+    </div>
+  </div>`;
+  document.querySelectorAll("#labels button").forEach(b => b.onclick = () => setLabel(b.dataset.v));
+  $("notes").oninput = e => { (store[r.__i] = store[r.__i] || {}).notes = e.target.value; save(); };
+  $("prev").onclick = () => select(cur - 1); $("next").onclick = () => select(cur + 1);
+  $("find").oninput = e => highlight(e.target.value);
+  document.querySelectorAll(".item").forEach((el, i) => el.classList.toggle("sel", i === k));
+  document.querySelector(".item.sel")?.scrollIntoView({ block: "nearest" });
+}
+function highlight(q) {
+  document.querySelectorAll("#ctxbox .c").forEach(el => {
+    const raw = el.textContent;
+    const words = q.split(/\s+/).filter(w => w.length > 1).map(w => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    el.innerHTML = words.length ? esc(raw).replace(new RegExp("(" + words.join("|") + ")", "gi"), "<mark>$1</mark>") : esc(raw);
+  });
+}
+function setLabel(v) {
+  const r = VIEW[cur]; if (!r) return;
+  const st = store[r.__i] = store[r.__i] || {};
+  st.label = (v === "" || st.label === v) ? "" : v;
+  save();
+  const keep = cur; const filterLab = $("fLab").value;
+  renderList();
+  if (st.label && filterLab === "todo") { applyFilterKeep(keep); } else select(Math.min(keep + (st.label ? 1 : 0), VIEW.length - 1));
+}
+function applyFilterKeep(k) { applyFilterAt(k); }
+function applyFilterAt(k) { applyFilter(); if (VIEW.length) select(Math.min(k, VIEW.length - 1)); }
+
+document.addEventListener("keydown", e => {
+  if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) return;
+  if (e.key === "ArrowRight" || e.key === "j") select(cur + 1);
+  else if (e.key === "ArrowLeft" || e.key === "k") select(cur - 1);
+  else if (e.key === "0") setLabel("");
+  else { const l = LABELS.find(x => x[2] === e.key); if (l) setLabel(l[0]); }
+});
+
+$("export").onclick = () => {
+  if (!ROWS.length) return;
+  const head = HEAD.filter(h => !["failure_category", "manual_label", "manual_notes"].includes(h)).concat(["failure_category", "manual_label", "manual_notes"]);
+  const rows = ROWS.map(r => Object.assign({}, r, {
+    failure_category: r.__cat, manual_label: store[r.__i]?.label || "", manual_notes: store[r.__i]?.notes || ""
+  }));
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([toCSV(head, rows)], { type: "text/csv" }));
+  a.download = fname.replace(/\.\w+$/, "") + "_labeled.csv"; a.click();
+};
+$("clear").onclick = () => { if (ROWS.length && confirm("Delete all manual labels and notes for this file?")) { store = {}; save(); applyFilter(); } };
+</script>
+</body>
+</html>

@@ -27,8 +27,12 @@ class Config:
     )
 
     # LLM configuration
-    HF_API_KEY = os.getenv("HF_API_KEY", "")
-    HF_MODEL = os.getenv("HF_MODEL", "mistralai/Mistral-7B-Instruct-v0.1")
+    OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+    MISTRAL_BASE_URL = (
+        os.getenv("MISTRALAI_BASE_URL")
+        or os.getenv("MISTRAL_BASE_URL")
+        or "https://api.mistral.ai/v1"
+    )
     LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
     LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "512"))
 

@@ -14,6 +14,15 @@ class ChatRole(str, Enum):
     SYSTEM = "system"
 
 
+class HostedProvider(str, Enum):
+    """Hosted chat provider selected by the frontend."""
+
+    HUGGINGFACE = "huggingface"
+    OPENAI = "openai"
+    MISTRAL = "mistral"
+    ANTHROPIC = "anthropic"
+
+
 class ChatMessage(BaseModel):
     role: ChatRole = Field(
         ..., description="The role of the message sender (user, assistant, or system)."
@@ -54,6 +63,19 @@ class ChatRequest(BaseModel):
         ge=0.0,
         le=1.0,
         description="Nucleus sampling probability for chat generation.",
+    )
+    hosted_provider: Optional[HostedProvider] = Field(
+        default=None,
+        description="Hosted provider to use when calling the remote RAG endpoint.",
+    )
+    hosted_model_name: Optional[str] = Field(
+        default=None,
+        description="Hosted chat model ID to use when calling the remote RAG endpoint.",
+    )
+    hosted_api_key: Optional[str] = Field(
+        default=None,
+        description="Request-scoped API key for the selected hosted provider.",
+        exclude=True,
     )
 
 
