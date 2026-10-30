@@ -16,6 +16,7 @@ from loguru import logger
 import requests
 
 ANSWER_CORRECTNESS_METRIC = "answer_correctness"
+DEFAULT_EXPECTED_QUESTION_COUNT = 38
 
 METRIC_COLS = [
     "faithfulness",
@@ -40,7 +41,7 @@ MISTRAL_MODEL_PREFIXES = (
     "voxtral-",
 )
 REPORTED_STATUS = "reported"
-NOT_REPORTED_STATUS = "not reported"
+NOT_REPORTED_STATUS = "no_reported"
 REFERENCE_STATUS_FILTERS = ["all", REPORTED_STATUS, NOT_REPORTED_STATUS]
 
 
@@ -140,8 +141,8 @@ def build_judge(args):
     from ragas.llms import llm_factory
     from dotenv import load_dotenv
 
-    # Use LangChain's native embeddings component directly to satisfy the legacy metric loop
     from langchain_ollama import ChatOllama, OllamaEmbeddings
+    from ragas.embeddings import LangchainEmbeddingsWrapper
     from ragas.llms.base import LangchainLLMWrapper
 
     load_dotenv(APP_ENV_PATH, override=False)
@@ -259,10 +260,12 @@ def build_judge(args):
         llm.model_args.pop("top_p", None)
         llm.model_args["max_completion_tokens"] = 8192
 
-    # Passing raw LangChain objects matches the legacy namespace metric signature requirements perfectly
-    embeddings = OllamaEmbeddings(
-        model=embedding_model,
-        base_url=args.ollama_base_url,
+    # RAGAS metrics also need embed_text, beyond LangChain's embed_query API.
+    embeddings = LangchainEmbeddingsWrapper(
+        OllamaEmbeddings(
+            model=embedding_model,
+            base_url=args.ollama_base_url,
+        )
     )
 
     return llm, embeddings
@@ -287,6 +290,9 @@ def normalize_reference_status(value) -> str:
 def infer_response_status(response) -> str:
     """Infer whether the model marked the requested information as present."""
     text = _clean_value(response)
+    status_label = normalize_reference_status(text)
+    if status_label in {REPORTED_STATUS, NOT_REPORTED_STATUS}:
+        return status_label
     normalized = re.sub(r"\s+", " ", text.lower()).strip(" .;:")
     if not normalized or normalized == MISSING_PAPER_RESPONSE.lower():
         return NOT_REPORTED_STATUS
@@ -322,14 +328,16 @@ def infer_response_status(response) -> str:
 
 
 def status_outcome(reference_status: str, response_status: str) -> str:
+    reference_status = normalize_reference_status(reference_status)
+    response_status = normalize_reference_status(response_status)
     if reference_status == REPORTED_STATUS and response_status == REPORTED_STATUS:
         return "reported_gt_marked_reported"
     if reference_status == REPORTED_STATUS and response_status == NOT_REPORTED_STATUS:
-        return "reported_gt_marked_not_reported"
+        return "reported_gt_marked_no_reported"
     if reference_status == NOT_REPORTED_STATUS and response_status == NOT_REPORTED_STATUS:
-        return "not_reported_gt_marked_not_reported"
+        return "no_reported_gt_marked_no_reported"
     if reference_status == NOT_REPORTED_STATUS and response_status == REPORTED_STATUS:
-        return "not_reported_gt_marked_reported"
+        return "no_reported_gt_marked_reported"
     return "unknown_status"
 
 
@@ -755,26 +763,114 @@ def limit_contexts(
     return [context[:max_context_chars] for context in contexts]
 
 
+def select_test_cases_for_run(
+    test_cases: list[dict],
+    offset: int,
+    limit: int | None,
+) -> list[dict]:
+    selected_cases = test_cases[offset:]
+    if limit is not None:
+        selected_cases = selected_cases[:limit]
+    return selected_cases
+
+
+def duplicate_values(values: list[str]) -> list[str]:
+    seen = set()
+    duplicated = set()
+    for value in values:
+        if value in seen:
+            duplicated.add(value)
+        seen.add(value)
+    return sorted(duplicated)
+
+
+def case_question_id(case: dict) -> str:
+    metadata = case.get("metadata", {})
+    return (
+        _clean_value(case.get("question_id"))
+        or _clean_value(metadata.get("category"))
+        or _clean_value(case.get("question"))
+    )
+
+
+def validate_expected_question_count(
+    test_cases: list[dict],
+    expected_count: int | None,
+    label: str,
+) -> None:
+    if expected_count is None:
+        return
+
+    question_ids = [case_question_id(case) for case in test_cases]
+    question_texts = [_clean_value(case.get("question")) for case in test_cases]
+    duplicate_ids = duplicate_values(question_ids)
+    duplicate_questions = duplicate_values(question_texts)
+
+    if len(test_cases) != expected_count:
+        raise ValueError(
+            f"{label} contains {len(test_cases)} questions; expected "
+            f"{expected_count}. Use --expected-question-count 0 only for "
+            "intentional partial/smoke runs."
+        )
+    if duplicate_ids:
+        raise ValueError(
+            f"{label} contains duplicate question ids/categories: "
+            + ", ".join(duplicate_ids)
+        )
+    if duplicate_questions:
+        raise ValueError(f"{label} contains duplicate question text.")
+
+    logger.info(f"{label}: validated {expected_count} questions.")
+
+
+def validate_sample_metadata_question_count(
+    sample_metadata: list[dict],
+    expected_count: int | None,
+    label: str,
+) -> None:
+    if expected_count is None:
+        return
+
+    query_ids = sorted(
+        {
+            int(metadata["query_id"])
+            for metadata in sample_metadata
+            if metadata.get("query_id") is not None
+        }
+    )
+    if len(query_ids) != expected_count:
+        raise RuntimeError(
+            f"{label} contains {len(query_ids)} unique questions; expected "
+            f"{expected_count}. Present query_ids: {query_ids}"
+        )
+
+    expected_query_ids = list(range(query_ids[0], query_ids[0] + expected_count))
+    if query_ids != expected_query_ids:
+        raise RuntimeError(
+            f"{label} query_ids are not contiguous. Present query_ids: {query_ids}"
+        )
+
+    logger.info(f"{label}: validated {expected_count} unique questions.")
+
+
 def build_eval_dataset(
     test_cases: list[dict],
     args,
+    query_id_offset: int = 0,
 ) -> tuple[object, list[dict]]:
     from ragas import EvaluationDataset, SingleTurnSample
 
     samples = []
     sample_metadata = []
-    selected_cases = test_cases[args.offset :]
-    if args.limit is not None:
-        selected_cases = selected_cases[: args.limit]
 
-    for i, case in enumerate(selected_cases, start=1):
+    for i, case in enumerate(test_cases, start=1):
         question = case["question"]
         ground_truth = get_case_reference(case)
         references = case.get("references") or []
         metadata = case.get("metadata", {})
-        query_id = args.offset + i
+        query_id = query_id_offset + i
 
-        logger.info(f"[{i}/{len(selected_cases)}] Querying: {question[:80]}...")
+        logger.info(f"[{i}/{len(test_cases)}] Querying: {question[:80]}...")
         try:
             start = time.perf_counter()
             api_result = query_rag_api(
@@ -1426,6 +1522,16 @@ def main():
         help="Number of dataset rows to skip before evaluation",
     )
     parser.add_argument(
+        "--expected-question-count",
+        type=int,
+        default=DEFAULT_EXPECTED_QUESTION_COUNT,
+        help=(
+            "Fail unless the selected evaluation set contains this many unique "
+            f"questions. Defaults to {DEFAULT_EXPECTED_QUESTION_COUNT}. Use 0 "
+            "only for intentional partial/smoke runs."
+        ),
+    )
+    parser.add_argument(
         "--correctness-threshold",
         type=float,
         default=0.75,
@@ -1450,6 +1556,7 @@ def main():
     )
     parser.add_argument(
         "--ragas-reference-status",
+        type=normalize_reference_status,
         choices=REFERENCE_STATUS_FILTERS,
         default=REPORTED_STATUS,
         help=(
@@ -1465,6 +1572,10 @@ def main():
         parser.error("--limit must be greater than 0")
     if args.offset < 0:
         parser.error("--offset cannot be negative")
+    if args.expected_question_count < 0:
+        parser.error("--expected-question-count cannot be negative")
+    if args.expected_question_count == 0:
+        args.expected_question_count = None
     if args.paper_index is not None and args.paper_index < 1:
         parser.error("--paper-index must be greater than 0")
 
@@ -1522,6 +1633,17 @@ def main():
     if args.convert_only:
         return
 
+    selected_test_cases = select_test_cases_for_run(
+        test_cases,
+        offset=args.offset,
+        limit=args.limit,
+    )
+    validate_expected_question_count(
+        selected_test_cases,
+        args.expected_question_count,
+        "Selected evaluation set",
+    )
+
     logger.info("Querying live API for each question...")
     if args.response_model:
         validate_response_model_available(
@@ -1532,13 +1654,22 @@ def main():
         activate_chat_model(args.response_model, args.model_info_url)
         logger.info(f"Activated chat model for RAG responses: {args.response_model}")
 
-    eval_dataset, sample_metadata = build_eval_dataset(test_cases, args)
+    eval_dataset, sample_metadata = build_eval_dataset(
+        selected_test_cases,
+        args,
+        query_id_offset=args.offset,
+    )
 
     if len(eval_dataset) == 0:
         logger.info(
             "No samples were successfully collected. Aborting.", file=sys.stderr
         )
         sys.exit(1)
+    validate_sample_metadata_question_count(
+        sample_metadata,
+        args.expected_question_count,
+        "Collected API response set",
+    )
 
     import pandas as pd
 
@@ -1564,9 +1695,13 @@ def main():
             file=sys.stderr,
         )
         sys.exit(1)
+    # Status filtering can legitimately remove entire question categories.
+    # Full question coverage was already validated before filtering.
+    filtered_question_count = len({row["query_id"] for row in sample_metadata})
 
     logger.info(
-        f"\nCollected {len(eval_dataset)} valid samples for RAGAS "
+        f"\nCollected {len(eval_dataset)} valid samples across "
+        f"{filtered_question_count} unique questions for RAGAS "
         f"(reference_status={args.ragas_reference_status}). "
         "Running RAGAs evaluation...\n"
     )

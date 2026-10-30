@@ -59,7 +59,7 @@ kbd{border:1px solid var(--line);border-bottom-width:2px;border-radius:3px;paddi
 <div id="main">
   <div id="list"></div>
   <div id="detail"><div id="empty"><h2>Load your results CSV</h2>
-    <p>Comma- or tab-separated. Everything stays in your browser; labels are saved automatically and survive a reload when you open the same file name again.</p></div></div>
+    <p>Comma- or tab-separated. Everything stays in your browser; labels are only read from the CSV itself (manual_label / manual_notes columns), never matched by file name. Use Export to save your progress.</p></div></div>
 </div>
 
 <script>
@@ -67,8 +67,7 @@ const LABELS = [
   ["retrieval_miss", "Context lacks the answer (retrieval failure)", "1"],
   ["generation_miss", "Context has the answer, model missed/wrong (generation failure)", "2"],
   ["gt_error", "Ground truth wrong or incomplete", "3"],
-  ["model_ok", "Model actually correct (metric false alarm)", "4"],
-  ["unclear", "Ambiguous / unsure", "5"]
+  ["model_ok", "Model actually correct (metric false alarm)", "4"]
 ];
 let HEAD = [], ROWS = [], VIEW = [], cur = -1, fname = "", store = {};
 
@@ -99,7 +98,7 @@ function toCSV(head, rows) {
 }
 
 /* ---------- failure category ---------- */
-const isNot = s => /not|no\b|absent|missing|none|n\/a/i.test(s || "") ;
+const isNot = s => /not|no\b|absent|missing|none|n\/a/i.test(String(s || "").replace(/[_-]+/g, " "));
 const isRep = s => (s || "").trim() !== "" && !isNot(s);
 function category(r) {
   const gt = r.reference_status, rs = r.response_status;
@@ -116,10 +115,8 @@ const CAT_NAME = {
   ok: "No failure (agree & correct)"
 };
 
-/* ---------- storage ---------- */
-const skey = () => "review:" + fname.replace(/(_labeled)+(?=\.)/, "");
-const save = () => { try { localStorage.setItem(skey(), JSON.stringify(store)); } catch (e) {} };
-const load = () => { try { store = JSON.parse(localStorage.getItem(skey())) || {}; } catch (e) { store = {}; } };
+/* ---------- state (in memory only; nothing is matched by file name) ---------- */
+const save = () => {};
 
 /* ---------- UI ---------- */
 const $ = id => document.getElementById(id);
@@ -135,16 +132,11 @@ $("file").onchange = e => {
     ROWS = t.slice(1).map((r, i) => {
       const o = {}; HEAD.forEach((h, j) => o[h] = r[j] ?? ""); o.__i = i; o.__cat = category(o); return o;
     });
-    load();
-    // resume from a previously exported CSV: restore labels/notes stored in its columns
-    let restored = 0;
+    store = {};
+    // labels/notes come ONLY from the CSV's own manual_label / manual_notes columns
     ROWS.forEach(r => {
-      if ((r.manual_label || r.manual_notes) && !store[r.__i]?.label) {
-        store[r.__i] = { label: r.manual_label || "", notes: store[r.__i]?.notes || r.manual_notes || "" };
-        if (r.manual_label) restored++;
-      }
+      if (r.manual_label || r.manual_notes) store[r.__i] = { label: r.manual_label || "", notes: r.manual_notes || "" };
     });
-    if (restored) save();
     const cats = {}; ROWS.forEach(r => cats[r.__cat] = (cats[r.__cat] || 0) + 1);
     $("fCat").innerHTML = `<option value="fail">All failures (${ROWS.length - (cats.ok || 0)})</option><option value="all">All rows (${ROWS.length})</option>` +
       Object.keys(CAT_NAME).map(k => `<option value="${k}">${CAT_NAME[k]} (${cats[k] || 0})</option>`).join("");
@@ -207,7 +199,7 @@ function select(k) {
       <div class="txt" id="ctxbox">${ctx.map((c, i) => `<div class="ctx"><b>[${i + 1}]</b> <span class="c">${esc(c)}</span></div>`).join("")}</div></div>
   </div>
   <div class="box lab">
-    <h3>Manual label <span class="hint">keys <kbd>1</kbd>–<kbd>5</kbd> label · <kbd>←</kbd>/<kbd>→</kbd> navigate · <kbd>0</kbd> clear</span></h3>
+    <h3>Manual label <span class="hint">keys <kbd>1</kbd>–<kbd>4</kbd> label · <kbd>←</kbd>/<kbd>→</kbd> navigate · <kbd>0</kbd> clear</span></h3>
     <div class="labpad">
       <div id="labels">${LABELS.map(([v, t, key]) => `<button data-v="${v}" class="${st.label === v ? "on" : ""}" title="${esc(t)}">${key}. ${esc(t)}</button>`).join("")}</div>
       <textarea id="notes" rows="2" style="width:100%" placeholder="Notes (optional)">${esc(st.notes || "")}</textarea>
