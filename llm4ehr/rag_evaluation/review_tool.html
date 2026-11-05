@@ -13,6 +13,8 @@ header h1{font-size:16px;margin:0 8px 0 0}
 select,input[type=text],textarea,button{font:inherit;padding:5px 8px;border:1px solid var(--line);border-radius:5px;background:#fff;color:var(--ink)}
 button{cursor:pointer}button:hover{border-color:var(--accent)}
 button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+#labels button{margin:0 4px 4px 0}
+#labels button.on{background:var(--ok);color:#fff;border-color:var(--ok)}
 #main{flex:1;display:flex;min-height:0}
 #list{width:330px;overflow:auto;border-right:1px solid var(--line);background:var(--panel)}
 .item{padding:8px 12px;border-bottom:1px solid var(--line);cursor:pointer}
@@ -170,9 +172,35 @@ function renderList() {
   document.querySelectorAll(".item").forEach(el => el.onclick = () => select(+el.dataset.k));
 }
 function clean(t) { return String(t || "").replace(/<br\s*\/?>/gi, "\n").replace(/\\\|/g, "|"); }
+/* Parse a Python list literal of strings, e.g. ['a\n', "b's"], as written by str(list) in pandas CSVs. */
+function parsePyList(s) {
+  s = s.trim();
+  if (s[0] !== "[" || s[s.length - 1] !== "]") return null;
+  const out = []; let i = 1;
+  const ESC = { n: "\n", t: "\t", r: "\r", "\\": "\\", "'": "'", '"': '"', "0": "\0" };
+  while (i < s.length - 1) {
+    const c = s[i];
+    if (c === " " || c === "," || c === "\n") { i++; continue; }
+    if (c !== "'" && c !== '"') return null;
+    let v = ""; i++;
+    while (i < s.length && s[i] !== c) {
+      if (s[i] === "\\") {
+        const n = s[i + 1];
+        if (n === "x") { v += String.fromCharCode(parseInt(s.substr(i + 2, 2), 16)); i += 4; continue; }
+        if (n === "u") { v += String.fromCharCode(parseInt(s.substr(i + 2, 4), 16)); i += 6; continue; }
+        if (n === "U") { v += String.fromCodePoint(parseInt(s.substr(i + 2, 8), 16)); i += 10; continue; }
+        v += n in ESC ? ESC[n] : "\\" + n; i += 2;
+      } else v += s[i++];
+    }
+    if (i >= s.length) return null;
+    out.push(v); i++;
+  }
+  return out;
+}
 function parseCtx(s) {
   try { const j = JSON.parse(s); if (Array.isArray(j)) return j.map(x => typeof x === "string" ? x : JSON.stringify(x)); } catch (e) {}
-  try { const j = JSON.parse(s.replace(/'/g, '"')); if (Array.isArray(j)) return j.map(String); } catch (e) {}
+  const py = parsePyList(s || "");
+  if (py) return py;
   return [s];
 }
 function select(k) {

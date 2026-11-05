@@ -137,6 +137,8 @@ def resolve_judge_provider(judge_model: str, judge_provider: str) -> str:
 
 
 def build_judge(args):
+    # Optional: rescore_saved_reference.py passes args without a judge seed.
+    judge_seed = getattr(args, "judge_seed", None)
     from openai import OpenAI
     from ragas.llms import llm_factory
     from dotenv import load_dotenv
@@ -163,6 +165,7 @@ def build_judge(args):
             base_url=args.ollama_base_url,
             temperature=0,
             num_predict=8192,
+            seed=judge_seed,
         )
         if not args.skip_judge_preflight:
             logger.info("Checking Ollama judge model with a tiny preflight request...")
@@ -219,6 +222,9 @@ def build_judge(args):
         llm.model_args.pop("temperature", None)
         llm.model_args.pop("top_p", None)
         llm.model_args["max_tokens"] = 8192
+        if judge_seed is not None:
+            # Mistral's seed parameter; best-effort on the provider side.
+            llm.model_args["extra_body"] = {"random_seed": judge_seed}
     else:
         openai_api_key = os.environ.get("OPENAI_API_KEY")
         if not openai_api_key:
@@ -259,6 +265,9 @@ def build_judge(args):
         llm.model_args.pop("temperature", None)
         llm.model_args.pop("top_p", None)
         llm.model_args["max_completion_tokens"] = 8192
+        if judge_seed is not None:
+            # OpenAI seed parameter; reproducibility is best-effort on the provider side.
+            llm.model_args["seed"] = judge_seed
 
     # RAGAS metrics also need embed_text, beyond LangChain's embed_query API.
     embeddings = LangchainEmbeddingsWrapper(
@@ -735,6 +744,7 @@ def query_rag_api(
     retrieval_scope: str,
     article_id: str | None = None,
     timeout: int | None = 120,
+    seed: int | None = None,
 ) -> dict:
     """Call the live RAG endpoint and return {response, contexts}."""
     payload = {
@@ -744,6 +754,9 @@ def query_rag_api(
     }
     if article_id:
         payload["article_id"] = article_id
+    if seed is not None:
+        # Fixed generator seed: repeated runs give identical answers for identical contexts.
+        payload["seed"] = seed
     resp = requests.post(api_url, json=payload, timeout=timeout)
     resp.raise_for_status()
     return resp.json()
@@ -879,6 +892,7 @@ def build_eval_dataset(
                 retrieval_scope=args.retrieval_scope,
                 article_id=metadata.get("selected_paper_id"),
                 timeout=args.api_timeout,
+                seed=args.generator_seed,
             )
             elapsed = time.perf_counter() - start
             logger.info(f"  API response received in {elapsed:.2f}s")
@@ -943,6 +957,8 @@ def build_eval_dataset(
                         "expected_context_count": 1,
                         "max_eval_contexts": args.max_eval_contexts,
                         "max_eval_context_chars": args.max_eval_context_chars,
+                        "generator_seed": args.generator_seed,
+                        "judge_seed": args.judge_seed,
                         "retrieval_scope": args.retrieval_scope,
                         "response_paper_count": len(response_rows),
                         "response_paper_titles": [
@@ -1016,6 +1032,8 @@ def build_eval_dataset(
                 ),
                 "max_eval_contexts": args.max_eval_contexts,
                 "max_eval_context_chars": args.max_eval_context_chars,
+                "generator_seed": args.generator_seed,
+                "judge_seed": args.judge_seed,
                 "retrieval_scope": args.retrieval_scope,
                 "response_paper_count": 1 if is_specific_paper_case else None,
                 "response_paper_titles": (
@@ -1314,6 +1332,8 @@ ALL_PAPER_RESULT_COLUMNS = [
     "expected_context_count",
     "max_eval_contexts",
     "max_eval_context_chars",
+    "generator_seed",
+    "judge_seed",
     "retrieval_scope",
     "response_paper_count",
     "response_paper_titles",
@@ -1471,6 +1491,18 @@ def main():
         "--ollama-base-url",
         default="http://localhost:11434",
         help="Base URL of the Ollama server",
+    )
+    parser.add_argument(
+        "--generator-seed",
+        type=int,
+        default=None,
+        help="Fixed Ollama seed sent with every RAG request (default: unseeded sampling)",
+    )
+    parser.add_argument(
+        "--judge-seed",
+        type=int,
+        default=None,
+        help="Fixed judge seed (Ollama seed, OpenAI seed, Mistral random_seed; best-effort for APIs)",
     )
     parser.add_argument(
         "--judge-timeout",

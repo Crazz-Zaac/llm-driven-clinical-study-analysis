@@ -32,6 +32,9 @@ class OllamaChatModel:
                 },
                 "stream": False,
             }
+            # A fixed seed makes sampling reproducible; without it Ollama draws a random one.
+            if request.seed is not None:
+                payload["options"]["seed"] = request.seed
 
             response = requests.post(
                 f"{settings.OLLAMA_URL}/api/chat",

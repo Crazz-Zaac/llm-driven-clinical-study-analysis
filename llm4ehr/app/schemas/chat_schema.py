@@ -64,6 +64,14 @@ class ChatRequest(BaseModel):
         le=1.0,
         description="Nucleus sampling probability for chat generation.",
     )
+    seed: Optional[int] = Field(
+        default=None,
+        description=(
+            "Random seed for local (Ollama) generation. Fixing it makes repeated "
+            "generations from the same context identical on the same hardware, "
+            "Ollama version and model build. None keeps unseeded sampling."
+        ),
+    )
     hosted_provider: Optional[HostedProvider] = Field(
         default=None,
         description="Hosted provider to use when calling the remote RAG endpoint.",
